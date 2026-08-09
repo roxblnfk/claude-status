@@ -6,7 +6,7 @@
   "packages": {
     ".": {
       "package-name": "claude-status",
-      "extra-files": ["Cargo.toml"],
+      "extra-files": [{ "type": "generic", "path": "Cargo.toml" }],
       "changelog-sections": [
         { "type": "feat", "section": "Features" },
         { "type": "fix", "section": "Bug Fixes" },
