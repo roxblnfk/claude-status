@@ -255,7 +255,7 @@ fn tokens_tooltip(
             // The date first, as the sessions plot does it: only every few days
             // gets an axis label, so a bar on its own says nothing about when.
             return Some(format!(
-                "{}\n{}: {}",
+                "{}\n{}\n{}",
                 timefmt::format_day_number(day),
                 short_model_name(model),
                 human_tokens(value)
@@ -541,10 +541,10 @@ mod tests {
 
         // The first layer spans 0..100, the second 100..150.
         let lower = tokens_tooltip(&per_day, &models, PlotPoint::new(7.0, 40.0)).unwrap();
-        assert_eq!(lower, format!("{}\nopus-5: 100", timefmt::format_day_number(7)));
+        assert_eq!(lower, format!("{}\nopus-5\n100", timefmt::format_day_number(7)));
 
         let upper = tokens_tooltip(&per_day, &models, PlotPoint::new(7.0, 120.0)).unwrap();
-        assert_eq!(upper, format!("{}\nfable-5: 50", timefmt::format_day_number(7)));
+        assert_eq!(upper, format!("{}\nfable-5\n50", timefmt::format_day_number(7)));
     }
 
     #[test]
@@ -563,7 +563,7 @@ mod tests {
         let per_day = vec![(7, BTreeMap::from([("claude-opus-5", 100)]))];
 
         let text = tokens_tooltip(&per_day, &models, PlotPoint::new(7.0, 0.0)).unwrap();
-        assert_eq!(text, format!("{}\nopus-5: 100", timefmt::format_day_number(7)));
+        assert_eq!(text, format!("{}\nopus-5\n100", timefmt::format_day_number(7)));
     }
 
     #[test]
