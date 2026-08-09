@@ -1,5 +1,7 @@
 # claude-status
 
+[![CI](https://github.com/roxblnfk/claude-status/actions/workflows/ci.yml/badge.svg)](https://github.com/roxblnfk/claude-status/actions/workflows/ci.yml)
+
 Monitoring how fast Claude Code usage limits are being spent: a tray icon with a
 ring gauge, history in SQLite, and advice on how much can still be spent today
 to land exactly within the weekly window.
@@ -44,6 +46,10 @@ Consequences worth remembering:
   `~/.claude/stats-cache.json`, which Claude Code computes itself.
 
 ## Building and installing
+
+Ready-made archives for Windows, macOS and Linux are attached to every
+[release](https://github.com/roxblnfk/claude-status/releases). Or build from
+source:
 
 ```bash
 cargo build --release
@@ -199,3 +205,15 @@ echo '{"model":{"display_name":"Opus"},"rate_limits":{"five_hour":{"used_percent
 
 `CLAUDE_CONFIG_DIR` makes `install`/`uninstall` equally safe to test against a
 throwaway directory.
+
+### Releases
+
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/):
+`feat:` bumps the minor version, `fix:` the patch one, everything else is left
+out of the changelog. [release-please](https://github.com/googleapis/release-please)
+keeps a pull request open with the next version and the accumulated changelog;
+merging it tags the release and builds the binaries for all platforms.
+
+The version is stored in `version.txt` and in `Cargo.toml` (the line marked
+`x-release-please-version`) — both are updated by that pull request, so neither
+should be edited by hand.

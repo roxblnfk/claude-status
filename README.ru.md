@@ -1,5 +1,7 @@
 # claude-status
 
+[![CI](https://github.com/roxblnfk/claude-status/actions/workflows/ci.yml/badge.svg)](https://github.com/roxblnfk/claude-status/actions/workflows/ci.yml)
+
 Слежение за расходом лимитов Claude Code: иконка в трее с кольцевым
 индикатором, история в SQLite и подсказка, сколько ещё можно потратить сегодня,
 чтобы ровно уложиться в недельное окно.
@@ -42,6 +44,10 @@ Claude Code отдаёт лимиты ровно в одном месте — н
   `~/.claude/stats-cache.json`, который Claude Code считает сам.
 
 ## Сборка и установка
+
+Готовые архивы для Windows, macOS и Linux приложены к каждому
+[релизу](https://github.com/roxblnfk/claude-status/releases). Либо собрать из
+исходников:
 
 ```bash
 cargo build --release
@@ -192,3 +198,15 @@ echo '{"model":{"display_name":"Opus"},"rate_limits":{"five_hour":{"used_percent
 
 `CLAUDE_CONFIG_DIR` позволяет так же безопасно проверять `install`/`uninstall` на
 временном каталоге.
+
+### Релизы
+
+Сообщения коммитов следуют [Conventional Commits](https://www.conventionalcommits.org/):
+`feat:` поднимает минорную версию, `fix:` — патч, остальное в changelog не
+попадает. [release-please](https://github.com/googleapis/release-please) держит
+открытым pull request со следующей версией и накопленным changelog; его слияние
+проставляет тег и собирает бинарники под все платформы.
+
+Версия хранится в `version.txt` и в `Cargo.toml` (строка с пометкой
+`x-release-please-version`) — оба обновляются этим pull request'ом, править их
+руками не нужно.

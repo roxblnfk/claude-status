@@ -17,5 +17,5 @@ desktop.ini
 *.sqlite3-wal
 *.sqlite3-shm
 *.bak
-config.toml
+/config.toml
 raw-statusline.jsonl
