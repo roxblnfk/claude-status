@@ -142,8 +142,8 @@ fn substitute(name: &str, ctx: &RenderContext<'_>) -> Option<String> {
             .and_then(|w| w.allowance_until(ctx.end_of_day))
             .map(|p| format!("{p:.1}%"))),
         "burn" => opt(ov
-            .week_burn_pct_per_day
-            .map(|b| tr_args("render.per_day", &[("value", &format!("{b:.1}"))]))),
+            .week_burn
+            .map(|b| tr_args("render.per_day", &[("value", &format!("{:.1}", b.pct_per_day))]))),
 
         _ => return None,
     };

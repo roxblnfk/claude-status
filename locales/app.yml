@@ -279,9 +279,15 @@ cli:
     five_hour:
       en: "  5 hours: %{pct}%  resets %{reset} (in %{left})"
       ru: "  5 часов: %{pct}%  сброс %{reset} (через %{left})"
+    five_hour_expired:
+      en: "  5 hours: window reset %{reset}, nothing reported since"
+      ru: "  5 часов: окно сброшено %{reset}, данных после этого нет"
     week:
       en: "  Week:    %{pct}%  resets %{reset} (in %{left})"
       ru: "  Неделя:  %{pct}%  сброс %{reset} (через %{left})"
+    week_expired:
+      en: "  Week:    window reset %{reset}, nothing reported since"
+      ru: "  Неделя:  окно сброшено %{reset}, данных после этого нет"
     allowance:
       en: "  Budget:  %{pct}%/day"
       ru: "  Норма:   %{pct}%/сутки"
@@ -458,15 +464,17 @@ overview:
       en: "%{pct}% (until midnight)"
       ru: "%{pct}% (до полуночи)"
     pace:
-      en: Spending now
-      ru: Тратится сейчас
+      en: Average spending
+      ru: Расход в среднем
     pace_hint:
       en: >-
-        How fast the limit has actually been going during the current window,
-        and where that rate leads if it keeps up.
+        The average over %{span} of observation — from the first reading of this
+        week to the latest one. Pauses count in, so a short burst does not turn
+        into a frightening forecast.
       ru: >-
-        С какой скоростью лимит расходуется на самом деле в текущем окне и к
-        чему такая скорость приведёт, если её не менять.
+        Среднее за %{span} наблюдений — от первого снимка этой недели до
+        последнего. Паузы входят в счёт, поэтому короткий всплеск не
+        превращается в пугающий прогноз.
     pace_value:
       en: "%{burn}% a day — %{projected}% of the limit spent by the reset"
       ru: "%{burn}% в сутки — к сбросу уйдёт %{projected}% лимита"

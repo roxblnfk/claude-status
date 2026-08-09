@@ -121,10 +121,14 @@ start of the weekly window to 100 % at the reset:
 - `{today_left}` — the same budget, scaled to the time until local midnight.
 - `{pace}` — deviation from the diagonal in percentage points: `↑+12` means you
   are running 12 pp ahead of schedule.
-- `{burn}` — the actual pace between the outermost samples of the current
-  window, %/day. The window is identified by `resets_at`: points from the
-  previous window are excluded, otherwise a reset from 100 % to 0 % would read
-  as a negative pace.
+- `{burn}` — the actual pace, %/day, averaged from the first reading of the
+  current window to the last moment the newest one was still being confirmed.
+  Pauses count in: a percentage point gained in four minutes and then held for
+  two hours is 11 %/day, not 350. The window is identified by `resets_at`:
+  points from the previous one are excluded, otherwise a reset from 100 % to
+  0 % would read as a negative pace. Below half an hour of observation there is
+  no pace at all — Claude Code reports whole percents, and one of them over a
+  few minutes extrapolates to nonsense.
 
 ## Localisation
 

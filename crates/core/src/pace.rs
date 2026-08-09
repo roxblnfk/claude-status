@@ -128,25 +128,42 @@ impl WindowState {
     }
 }
 
-/// Actual burn rate of the weekly window, % per day.
+/// A measured spending rate.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Burn {
+    /// Percent of the window per day.
+    pub pct_per_day: f64,
+    /// The span the rate was averaged over. Kept so the figure can be shown
+    /// with the observation it rests on.
+    pub span_secs: i64,
+}
+
+/// The shortest span a rate may be averaged over.
 ///
-/// Measured between the outermost samples within a single window: if the window
-/// reset in between (`week_resets_at` changed), earlier points are discarded —
-/// otherwise a reset from 100 % to 0 % would read as a negative pace.
-pub fn week_burn_pct_per_day(samples: &[Sample]) -> Option<f64> {
-    burn_pct_per_day(samples, |s| s.week_pct, |s| s.week_resets_at)
+/// Claude Code reports whole percents, so over a few minutes the smallest step
+/// it can report — a single point — already extrapolates to hundreds of percent
+/// a day. Such a number says nothing about the days ahead.
+const MIN_BURN_SPAN_SECS: i64 = 1800;
+
+/// Actual spending rate of the weekly window.
+///
+/// Measured within a single window: if it reset in between (`week_resets_at`
+/// changed), earlier points are discarded — otherwise a reset from 100 % to 0 %
+/// would read as a negative pace.
+pub fn week_burn(samples: &[Sample]) -> Option<Burn> {
+    burn(samples, |s| s.week_pct, |s| s.week_resets_at)
 }
 
-/// Actual burn rate of the five-hour window, % per day.
-pub fn five_hour_burn_pct_per_day(samples: &[Sample]) -> Option<f64> {
-    burn_pct_per_day(samples, |s| s.five_pct, |s| s.five_resets_at)
+/// Actual spending rate of the five-hour window.
+pub fn five_hour_burn(samples: &[Sample]) -> Option<Burn> {
+    burn(samples, |s| s.five_pct, |s| s.five_resets_at)
 }
 
-fn burn_pct_per_day(
+fn burn(
     samples: &[Sample],
     pct: impl Fn(&Sample) -> Option<f64>,
     resets_at: impl Fn(&Sample) -> Option<i64>,
-) -> Option<f64> {
+) -> Option<Burn> {
     let last = samples.iter().rev().find(|s| pct(s).is_some())?;
     let window = resets_at(last);
 
@@ -157,12 +174,16 @@ fn burn_pct_per_day(
         .find(|s| pct(s).is_some() && resets_at(s) == window)
         .filter(|s| s.id != last.id)?;
 
-    let span_secs = (last.ts - first.ts) as f64;
-    if span_secs <= 0.0 {
+    // The span runs to the last moment the newest reading was still confirmed,
+    // not to the moment it first appeared. Ending it at the appearance would
+    // cut off the idle stretch that followed — the very time during which
+    // nothing was spent — and inflate the rate several times over.
+    let span_secs = last.seen_until() - first.ts;
+    if span_secs < MIN_BURN_SPAN_SECS {
         return None;
     }
     let delta = pct(last)? - pct(first)?;
-    Some(delta / span_secs * SECS_PER_DAY)
+    Some(Burn { pct_per_day: delta / span_secs as f64 * SECS_PER_DAY, span_secs })
 }
 
 /// Full summary of both windows at `now`.
@@ -171,8 +192,8 @@ pub struct Overview {
     pub five_hour: Option<WindowState>,
     pub week: Option<WindowState>,
     pub week_opus: Option<WindowState>,
-    /// Actual burn rate of the weekly window, % per day.
-    pub week_burn_pct_per_day: Option<f64>,
+    /// Actual spending rate of the weekly window.
+    pub week_burn: Option<Burn>,
     /// When the sample was taken — tells how fresh the data is.
     pub sampled_at: Option<i64>,
 }
@@ -190,8 +211,8 @@ impl Overview {
             five_hour: window_of(current.five_pct, current.five_resets_at, FIVE_HOUR_SECS, now),
             week: window_of(current.week_pct, current.week_resets_at, SEVEN_DAY_SECS, now),
             week_opus: window_of(current.opus_pct, current.opus_resets_at, SEVEN_DAY_SECS, now),
-            week_burn_pct_per_day: week_burn_pct_per_day(pace_samples),
-            sampled_at: Some(current.last_seen_ts.max(current.ts)),
+            week_burn: week_burn(pace_samples),
+            sampled_at: Some(current.seen_until()),
         }
     }
 
@@ -320,9 +341,11 @@ mod tests {
     #[test]
     fn burn_rate_from_two_points() {
         // 10 % over half a day => 20 %/day.
-        let samples = vec![sample(1, 0, 10.0, SEVEN_DAY_SECS), sample(2, DAY / 2, 20.0, SEVEN_DAY_SECS)];
-        let burn = week_burn_pct_per_day(&samples).unwrap();
-        assert!((burn - 20.0).abs() < 1e-6, "{burn}");
+        let samples =
+            vec![sample(1, 0, 10.0, SEVEN_DAY_SECS), sample(2, DAY / 2, 20.0, SEVEN_DAY_SECS)];
+        let burn = week_burn(&samples).unwrap();
+        assert!((burn.pct_per_day - 20.0).abs() < 1e-6, "{burn:?}");
+        assert_eq!(burn.span_secs, DAY / 2);
     }
 
     #[test]
@@ -334,14 +357,36 @@ mod tests {
             sample(3, 2 * DAY, 2.0, 2 * SEVEN_DAY_SECS),
             sample(4, 3 * DAY, 12.0, 2 * SEVEN_DAY_SECS),
         ];
-        let burn = week_burn_pct_per_day(&samples).unwrap();
-        assert!((burn - 10.0).abs() < 1e-6, "pace uses the new window only: {burn}");
+        let burn = week_burn(&samples).unwrap();
+        assert!((burn.pct_per_day - 10.0).abs() < 1e-6, "pace uses the new window only: {burn:?}");
+    }
+
+    #[test]
+    fn burn_rate_runs_to_the_last_confirmation_not_the_first_sighting() {
+        // One point gained in four minutes, then two hours of the same reading
+        // being confirmed over and over. Measuring only the four minutes would
+        // read as 360 %/day; across everything observed it is about 11.
+        let mut last = sample(2, 245, 60.0, SEVEN_DAY_SECS);
+        last.last_seen_ts = 7568;
+        let samples = vec![sample(1, 0, 59.0, SEVEN_DAY_SECS), last];
+
+        let burn = week_burn(&samples).unwrap();
+        assert_eq!(burn.span_secs, 7568);
+        assert!((burn.pct_per_day - 11.4).abs() < 0.1, "{burn:?}");
+    }
+
+    #[test]
+    fn burn_rate_needs_a_long_enough_span() {
+        // Whole percents over four minutes extrapolate to nonsense.
+        let samples =
+            vec![sample(1, 0, 59.0, SEVEN_DAY_SECS), sample(2, 245, 60.0, SEVEN_DAY_SECS)];
+        assert!(week_burn(&samples).is_none());
     }
 
     #[test]
     fn burn_rate_needs_two_points() {
-        assert!(week_burn_pct_per_day(&[]).is_none());
-        assert!(week_burn_pct_per_day(&[sample(1, 0, 10.0, SEVEN_DAY_SECS)]).is_none());
+        assert!(week_burn(&[]).is_none());
+        assert!(week_burn(&[sample(1, 0, 10.0, SEVEN_DAY_SECS)]).is_none());
     }
 
     #[test]

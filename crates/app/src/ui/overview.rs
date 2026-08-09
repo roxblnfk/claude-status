@@ -219,9 +219,20 @@ fn budget_card(ui: &mut egui::Ui, state: &AppState, w: &WindowState, now: i64) {
             };
             ui.end_row();
 
-            ui.label(tr("overview.budget.pace")).on_hover_text(tr("overview.budget.pace_hint"));
-            match state.overview.week_burn_pct_per_day {
+            ui.label(tr("overview.budget.pace")).on_hover_text(tr_args(
+                "overview.budget.pace_hint",
+                &[(
+                    "span",
+                    &state
+                        .overview
+                        .week_burn
+                        .map(|b| timefmt::duration(b.span_secs))
+                        .unwrap_or_else(|| "—".to_owned()),
+                )],
+            ));
+            match state.overview.week_burn {
                 Some(burn) => {
+                    let burn = burn.pct_per_day;
                     let projected = w.projected_used_at_reset(burn);
                     // Above 100 the projection stops being a figure worth
                     // printing: the limit simply ends earlier, and the next row
@@ -243,8 +254,8 @@ fn budget_card(ui: &mut egui::Ui, state: &AppState, w: &WindowState, now: i64) {
             };
             ui.end_row();
 
-            if let Some(burn) = state.overview.week_burn_pct_per_day
-                && let Some(at) = w.exhausted_at(burn)
+            if let Some(burn) = state.overview.week_burn
+                && let Some(at) = w.exhausted_at(burn.pct_per_day)
             {
                 ui.label(tr("overview.budget.exhausted"));
                 ui.colored_label(
@@ -283,8 +294,8 @@ fn advice(state: &AppState, w: &WindowState, now: i64) -> Option<(String, Option
     let per_day = format!("{:.1}", w.allowance_per_day_pct()?);
     let today = format!("{:.1}", w.allowance_until(timefmt::end_of_local_day(now))?);
 
-    if let Some(burn) = state.overview.week_burn_pct_per_day
-        && let Some(at) = w.exhausted_at(burn)
+    if let Some(burn) = state.overview.week_burn
+        && let Some(at) = w.exhausted_at(burn.pct_per_day)
     {
         let text = tr_args(
             "overview.budget.advice.slow_down",

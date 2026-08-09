@@ -36,6 +36,13 @@ pub struct Sample {
     pub version: Option<String>,
 }
 
+impl Sample {
+    /// The last moment this reading was known to still hold.
+    pub fn seen_until(&self) -> i64 {
+        self.last_seen_ts.max(self.ts)
+    }
+}
+
 /// What writing a sample actually did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Written {
@@ -308,9 +315,10 @@ impl Db {
         };
 
         let first = pick("ts, id")?;
-        // Among equal peaks the earliest one: that is when the level was
-        // actually reached, and a later repeat would flatten the pace.
-        let peak = pick("week_pct DESC, ts, id")?;
+        // Among equal peaks the one confirmed latest: the pace is averaged up
+        // to the last observation, and the stretch where the level held is part
+        // of the average rather than something to cut away.
+        let peak = pick("week_pct DESC, last_seen_ts DESC, ts DESC, id DESC")?;
 
         Ok(match (first, peak) {
             (Some(first), Some(peak)) if first.id != peak.id => vec![first, peak],
@@ -603,6 +611,23 @@ mod tests {
         assert_eq!(bounds.len(), 2);
         assert_eq!(bounds[0].ts, 100);
         assert_eq!(bounds[1].ts, 300);
+    }
+
+    #[test]
+    fn burn_endpoints_take_the_latest_confirmation_of_the_peak() {
+        let db = Db::open_in_memory().unwrap();
+        // The week stops at 40 while the five-hour window keeps moving, so the
+        // peak is repeated by several rows. The pace has to span all of them:
+        // the stretch where the week stood still is exactly what keeps the rate
+        // from being read off a four-minute burst.
+        db.record(&input(10.0, 20.0, 999), 100).unwrap();
+        db.record(&input(20.0, 40.0, 999), 200).unwrap();
+        db.record(&input(30.0, 40.0, 999), 300).unwrap();
+        db.record(&input(40.0, 40.0, 999), 400).unwrap();
+
+        let bounds = db.burn_endpoints().unwrap();
+        assert_eq!(bounds[0].ts, 100);
+        assert_eq!(bounds[1].ts, 400, "the peak is taken where it was last confirmed");
     }
 
     #[test]

@@ -134,21 +134,35 @@ fn status() -> Result<()> {
     }
     if let Some(w) = overview.week {
         println!("{}", window_line("cli.status.week", &w));
-        if let Some(per_day) = w.allowance_per_day_pct() {
-            println!("{}", tr_args("cli.status.allowance", &[("pct", &format!("{per_day:5.1}"))]));
-        }
-        if let Some(burn) = overview.week_burn_pct_per_day {
-            println!("{}", tr_args("cli.status.burn", &[("pct", &format!("{burn:5.1}"))]));
+        // Past the reset the remainder belongs to a week that is over; there is
+        // nothing left to divide between days.
+        if !w.is_expired() {
+            if let Some(per_day) = w.allowance_per_day_pct() {
+                println!(
+                    "{}",
+                    tr_args("cli.status.allowance", &[("pct", &format!("{per_day:5.1}"))])
+                );
+            }
+            if let Some(burn) = overview.week_burn {
+                let pct = format!("{:5.1}", burn.pct_per_day);
+                println!("{}", tr_args("cli.status.burn", &[("pct", &pct)]));
+            }
         }
     }
     Ok(())
 }
 
 fn window_line(key: &str, w: &claude_status_core::WindowState) -> String {
+    let Some(pct) = w.live_used_pct() else {
+        return tr_args(
+            &format!("{key}_expired"),
+            &[("reset", &timefmt::datetime(w.resets_at))],
+        );
+    };
     tr_args(
         key,
         &[
-            ("pct", &format!("{:5.1}", w.used_pct)),
+            ("pct", &format!("{pct:5.1}")),
             ("reset", &timefmt::datetime(w.resets_at)),
             ("left", &timefmt::duration(w.remaining_secs())),
         ],
