@@ -1,0 +1,22 @@
+[package]
+name = "claude-status"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+claude-status-core = { workspace = true }
+eframe = "0.36.1"
+egui = "0.36.1"
+egui_extras = "0.36.1"
+egui_plot = "0.37.0"
+tiny-skia = "0.12.0"
+tray-icon = "0.24.2"
+
+# The tray icon sits on top of libayatana-appindicator and needs a GTK main
+# loop, which winit does not provide — we turn it by hand from the paint loop.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"

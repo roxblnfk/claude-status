@@ -1,0 +1,21 @@
+/target
+
+# Editors and IDEs
+/.idea/
+/.vscode/
+*.iml
+*.swp
+*~
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local runtime data, in case CLAUDE_STATUS_DIR points at the working tree
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.bak
+config.toml
+raw-statusline.jsonl

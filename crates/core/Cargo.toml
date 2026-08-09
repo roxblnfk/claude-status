@@ -1,0 +1,20 @@
+[package]
+name = "claude-status-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+dirs = "6.0.0"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+rust-i18n = "4.2.1"
+serde = { version = "1.0.229", features = ["derive"] }
+# preserve_order: editing ~/.claude/settings.json must not reorder other keys.
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+sys-locale = "0.3.2"
+thiserror = "2.0.20"
+time = { version = "0.3.55", features = ["formatting", "local-offset", "macros"] }
+toml = "1.1.4"

@@ -1,0 +1,683 @@
+_version: 2
+
+# Interpolation uses %{name}. Keep placeholders like {five_pct} untranslated —
+# those are statusline template tokens, not i18n variables.
+
+error:
+  home_dir:
+    en: could not determine the user home directory
+    ru: не удалось определить домашний каталог пользователя
+  data_dir:
+    en: could not determine the application data directory
+    ru: не удалось определить каталог данных приложения
+  create_dir:
+    en: could not create directory %{path}
+    ru: не удалось создать каталог %{path}
+  open_db:
+    en: could not open database %{path}
+    ru: не удалось открыть базу %{path}
+  read_file:
+    en: could not read %{path}
+    ru: не удалось прочитать %{path}
+  write_file:
+    en: could not write %{path}
+    ru: не удалось записать %{path}
+  parse_file:
+    en: could not parse %{path}
+    ru: не удалось разобрать %{path}
+  serialize_config:
+    en: could not serialize the configuration
+    ru: не удалось сериализовать конфиг
+  not_an_object:
+    en: "%{path} does not contain a JSON object"
+    ru: "%{path} содержит не JSON-объект"
+  backup:
+    en: could not save a backup to %{path}
+    ru: не удалось сохранить резервную копию в %{path}
+  save_previous:
+    en: could not save the previous statusLine value
+    ru: не удалось сохранить прежний statusLine
+  own_exe:
+    en: could not determine the path to our own binary
+    ru: не удалось определить путь к своему бинарнику
+  exe_parent:
+    en: the binary has no parent directory
+    ru: у бинарника нет родительского каталога
+  hook_missing:
+    en: "%{hook} not found next to %{exe} — build both binaries (cargo build --release)"
+    ru: "не найден %{hook} рядом с %{exe} — соберите оба бинарника (cargo build --release)"
+  foreign_statusline:
+    en: |-
+      settings.json already defines a third-party statusLine: %{command}
+      repeat with force to replace it (the previous value will be preserved)
+    ru: |-
+      в settings.json уже прописан сторонний statusLine: %{command}
+      повторите с force, чтобы заменить его (прежнее значение будет сохранено)
+  not_ours:
+    en: "statusLine belongs to someone else (%{command}) — leaving it alone"
+    ru: "statusLine принадлежит не нам (%{command}) — оставляем как есть"
+  tray_unavailable:
+    en: "tray unavailable: %{error}"
+    ru: "трей недоступен: %{error}"
+  icon_update:
+    en: "could not update the tray icon: %{error}"
+    ru: "не удалось обновить иконку: %{error}"
+  build_icon:
+    en: could not build an icon from RGBA
+    ru: не удалось построить иконку из RGBA
+  create_tray:
+    en: could not create the tray icon
+    ru: не удалось создать иконку в трее
+  gtk_init:
+    en: could not initialise GTK (libgtk-3 required)
+    ru: не удалось инициализировать GTK (нужен libgtk-3)
+  run_gui:
+    en: "could not start the GUI: %{error}"
+    ru: "не удалось запустить GUI: %{error}"
+
+time:
+  days_hours:
+    en: "%{days}d %{hours}h"
+    ru: "%{days}д %{hours}ч"
+  hours_minutes:
+    en: "%{hours}h %{minutes}m"
+    ru: "%{hours}ч %{minutes}м"
+  minutes:
+    en: "%{minutes}m"
+    ru: "%{minutes}м"
+  seconds:
+    en: "%{seconds}s"
+    ru: "%{seconds}с"
+
+render:
+  per_day:
+    en: "%{value}%/day"
+    ru: "%{value}%/сут"
+  placeholder:
+    model:
+      en: current model name
+      ru: имя текущей модели
+    model_id:
+      en: model identifier
+      ru: идентификатор модели
+    effort:
+      en: reasoning effort level
+      ru: уровень reasoning effort
+    session:
+      en: session name
+      ru: имя сессии
+    dir:
+      en: current directory name
+      ru: имя текущего каталога
+    cost:
+      en: session cost in USD
+      ru: стоимость сессии в USD
+    ctx_pct:
+      en: context window usage, %
+      ru: заполнение контекстного окна, %
+    ctx_bar:
+      en: context usage bar
+      ru: полоса заполнения контекста
+    five_pct:
+      en: 5-hour limit used, %
+      ru: израсходовано 5-часового лимита, %
+    five_bar:
+      en: 5-hour limit bar
+      ru: полоса 5-часового лимита
+    five_reset:
+      en: 5-hour window reset time
+      ru: время сброса 5-часового окна
+    five_left:
+      en: time left until the 5-hour window resets
+      ru: сколько осталось до сброса 5-часового окна
+    week_pct:
+      en: weekly limit used, %
+      ru: израсходовано недельного лимита, %
+    week_bar:
+      en: weekly limit bar
+      ru: полоса недельного лимита
+    week_reset:
+      en: weekly window reset date
+      ru: дата сброса недельного окна
+    week_left:
+      en: time left until the weekly window resets
+      ru: сколько осталось до сброса недельного окна
+    opus_pct:
+      en: weekly Opus limit used, %
+      ru: израсходовано недельного лимита Opus, %
+    opus_bar:
+      en: weekly Opus limit bar
+      ru: полоса недельного лимита Opus
+    pace:
+      en: deviation from the even pace, pp
+      ru: отклонение от равномерного темпа, п.п.
+    daily:
+      en: daily allowance of the weekly limit, %
+      ru: суточная норма расхода недельного лимита, %
+    today_left:
+      en: how much can still be spent today, %
+      ru: сколько ещё можно потратить сегодня, %
+    burn:
+      en: actual burn rate, %/day
+      ru: фактический темп расхода, %/сутки
+
+preset:
+  default:
+    en: Default
+    ru: По умолчанию
+  compact:
+    en: Compact
+    ru: Компактный
+  bars:
+    en: Limits with bars
+    ru: Только лимиты с полосами
+  budget:
+    en: Today's budget
+    ru: Бюджет на сегодня
+  until_reset:
+    en: Until reset
+    ru: До сброса
+  detailed:
+    en: Detailed
+    ru: Подробный
+  minimal:
+    en: Minimal
+    ru: Минимальный
+
+cli:
+  help:
+    en: |-
+      claude-status — Claude Code usage limit monitor
+
+      Usage:
+        claude-status                       launch the window and tray icon
+        claude-status install [--interval N] [--force]
+                                            register the hook in ~/.claude/settings.json
+        claude-status uninstall             remove the hook from the settings
+        claude-status status                show the registration state and the latest sample
+        claude-status preview [template]    print the status line
+        claude-status --help                this help
+
+      install options:
+        --interval N   re-run the command every N seconds (default 60)
+        --force        replace a third-party statusLine command, preserving it
+
+      Environment variables:
+        CLAUDE_CONFIG_DIR    Claude Code directory instead of ~/.claude
+        CLAUDE_STATUS_DIR    directory holding the database and the configuration
+        CLAUDE_STATUS_DUMP   file the hook appends raw Claude Code JSON to
+        CLAUDE_STATUS_LANG   interface language: en, ru or auto
+        CLAUDE_STATUS_DEBUG  print hook errors to stderr
+    ru: |-
+      claude-status — наблюдение за лимитами Claude Code
+
+      Использование:
+        claude-status                       запустить окно и иконку в трее
+        claude-status install [--interval N] [--force]
+                                            прописать хук в ~/.claude/settings.json
+        claude-status uninstall             убрать хук из настроек
+        claude-status status                показать состояние прописки и последний снимок
+        claude-status preview [шаблон]      напечатать статусную строку
+        claude-status --help                эта справка
+
+      Ключи install:
+        --interval N   перезапускать команду каждые N секунд (по умолчанию 60)
+        --force        заменить чужую команду statusLine, сохранив её
+
+      Переменные окружения:
+        CLAUDE_CONFIG_DIR    каталог Claude Code вместо ~/.claude
+        CLAUDE_STATUS_DIR    каталог с базой и конфигом
+        CLAUDE_STATUS_DUMP   файл, куда хук дописывает сырой JSON от Claude Code
+        CLAUDE_STATUS_LANG   язык интерфейса: en, ru или auto
+        CLAUDE_STATUS_DEBUG  печатать ошибки хука в stderr
+  unknown_command:
+    en: "unknown command: %{command}"
+    ru: "неизвестная команда: %{command}"
+  unknown_install_flag:
+    en: "unknown install option: %{flag}"
+    ru: "неизвестный ключ install: %{flag}"
+  interval_needs_value:
+    en: --interval requires a value in seconds
+    ru: --interval требует значение в секундах
+  interval_not_a_number:
+    en: "--interval: expected a number of seconds, got %{value}"
+    ru: "--interval: ожидалось число секунд, получено %{value}"
+  installed_at:
+    en: "Hook registered: %{path}"
+    ru: "Хук прописан: %{path}"
+  settings_path:
+    en: "Settings: %{path}"
+    ru: "Настройки: %{path}"
+  data_path:
+    en: "Data:     %{path}"
+    ru: "Данные:   %{path}"
+  restart_notice:
+    en: Restart the Claude Code session for the hook to take effect.
+    ru: Перезапустите сессию Claude Code, чтобы хук заработал.
+  uninstalled:
+    en: The hook has been removed from the Claude Code settings.
+    ru: Хук убран из настроек Claude Code.
+  status:
+    ours:
+      en: "Hook:  registered (%{command})"
+      ru: "Хук:   установлен (%{command})"
+    foreign:
+      en: "Hook:  third-party command (%{command})"
+      ru: "Хук:   чужая команда (%{command})"
+    absent:
+      en: "Hook:  not registered — limits are not being collected"
+      ru: "Хук:   не установлен — лимиты не собираются"
+    database:
+      en: "Data:  %{path}"
+      ru: "База:  %{path}"
+    no_samples:
+      en: No samples yet.
+      ru: Снимков пока нет.
+    latest:
+      en: "Latest sample: %{time}"
+      ru: "Последний снимок: %{time}"
+    five_hour:
+      en: "  5 hours: %{pct}%  resets %{reset} (in %{left})"
+      ru: "  5 часов: %{pct}%  сброс %{reset} (через %{left})"
+    week:
+      en: "  Week:    %{pct}%  resets %{reset} (in %{left})"
+      ru: "  Неделя:  %{pct}%  сброс %{reset} (через %{left})"
+    allowance:
+      en: "  Budget:  %{pct}%/day"
+      ru: "  Норма:   %{pct}%/сутки"
+    burn:
+      en: "  Pace:    %{pct}%/day"
+      ru: "  Темп:    %{pct}%/сутки"
+
+tray:
+  menu:
+    show:
+      en: Show statistics
+      ru: Показать статистику
+    refresh:
+      en: Refresh
+      ru: Обновить
+    quit:
+      en: Quit
+      ru: Выход
+  tooltip:
+    title:
+      en: Claude Code
+      ru: Claude Code
+    five_hour:
+      en: "5h %{pct}% ⟳%{reset}"
+      ru: "5ч %{pct}% ⟳%{reset}"
+    week:
+      en: "week %{pct}% ⟳%{reset}"
+      ru: "нед %{pct}% ⟳%{reset}"
+    allowance:
+      en: "budget %{pct}%/day"
+      ru: "норма %{pct}%/сут"
+    no_data:
+      en: no data — connect to Claude Code
+      ru: нет данных — подключите Claude Code
+    stale:
+      en: "data is %{age} old"
+      ru: "данные %{age} назад"
+
+ui:
+  window_title:
+    en: Claude Status
+    ru: Claude Status
+  tab:
+    overview:
+      en: Overview
+      ru: Обзор
+    history:
+      en: History
+      ru: История
+    models:
+      en: Models
+      ru: Модели
+    settings:
+      en: Settings
+      ru: Настройки
+  refresh_hint:
+    en: Reload the data
+    ru: Перечитать данные
+  refreshed_at:
+    en: "updated %{time}"
+    ru: "обновлено %{time}"
+  error:
+    en: "Error: %{error}"
+    ru: "Ошибка: %{error}"
+  range:
+    day:
+      en: Day
+      ru: Сутки
+    week:
+      en: Week
+      ru: Неделя
+    month:
+      en: Month
+      ru: Месяц
+
+overview:
+  empty:
+    title:
+      en: No data yet
+      ru: Данных пока нет
+    explanation:
+      en: Statistics start once Claude Status is connected to Claude Code.
+      ru: Статистика начнёт собираться после подключения к Claude Code.
+    installed:
+      en: Connected. Data will appear after the first reply in a Claude Code session.
+      ru: Подключено. Данные появятся после первого ответа в сессии Claude Code.
+    not_installed:
+      en: Not connected to Claude Code yet.
+      ru: Подключения к Claude Code пока нет.
+    open_settings:
+      en: Open settings
+      ru: Открыть настройки
+    register:
+      en: Connect to Claude Code
+      ru: Подключить к Claude Code
+    register_hint:
+      en: Opens the settings, where one button does it
+      ru: Откроет настройки, где это делается одной кнопкой
+  card:
+    five_hour:
+      en: Session — 5 hours
+      ru: Сессия — 5 часов
+    week:
+      en: Week
+      ru: Неделя
+    week_opus:
+      en: Week — Opus
+      ru: Неделя — Opus
+  expired:
+    en: window has already reset
+    ru: окно уже сброшено
+  resets:
+    en: "resets %{time} · in %{left}"
+    ru: "сброс %{time} · через %{left}"
+  even_pace:
+    en: "Even pace: %{pct}%"
+    ru: "Равномерный график: %{pct}%"
+  verdict:
+    ahead:
+      en: spending faster than the even pace
+      ru: тратим быстрее равномерного графика
+    behind:
+      en: comfortably within budget
+      ru: идём с запасом
+    on_track:
+      en: on track
+      ru: в графике
+  deviation:
+    en: "(%{value} pp, %{verdict})"
+    ru: "(%{value} п.п., %{verdict})"
+  budget:
+    title:
+      en: Recommendation
+      ru: Рекомендация
+    remaining:
+      en: Limit remaining
+      ru: Осталось лимита
+    per_day:
+      en: Daily budget
+      ru: Норма в сутки
+    per_day_value:
+      en: "%{pct}% — to land exactly within the remaining %{left}"
+      ru: "%{pct}% — чтобы ровно уложиться в оставшиеся %{left}"
+    today:
+      en: Still available today
+      ru: Можно ещё сегодня
+    today_value:
+      en: "%{pct}% (until midnight)"
+      ru: "%{pct}% (до полуночи)"
+    pace:
+      en: Actual pace
+      ru: Фактический темп
+    pace_value:
+      en: "%{burn}%/day → %{projected}% by reset"
+      ru: "%{burn}%/сут → к сбросу %{projected}%"
+    pace_unknown:
+      en: not enough data yet
+      ru: данных пока мало
+    exhausted:
+      en: Limit runs out
+      ru: Лимит кончится
+    exhausted_value:
+      en: "%{time} (%{left} before the reset)"
+      ru: "%{time} (за %{left} до сброса)"
+  freshness:
+    en: "Updated %{age} ago"
+    ru: "Обновлено %{age} назад"
+  freshness_stale:
+    en: "Updated %{age} ago — Claude Code does not seem to be running"
+    ru: "Обновлено %{age} назад — Claude Code, похоже, не запущен"
+
+history:
+  limits:
+    title:
+      en: Limit usage
+      ru: Расход лимитов
+  sessions:
+    title:
+      en: Sessions per day, last %{days} days
+      ru: Сессий в день, последние %{days} дней
+    series:
+      en: Sessions
+      ru: Сессии
+  tokens:
+    title:
+      en: Tokens per day by model, last %{days} days
+      ru: Токены в день по моделям, последние %{days} дней
+  period:
+    en: "Period:"
+    ru: "Период:"
+  sample_count:
+    en: "%{count} records"
+    ru: "записей: %{count}"
+  empty:
+    en: Nothing recorded for the selected period.
+    ru: За выбранный период записей нет.
+  series:
+    five_hour:
+      en: 5 hours
+      ru: 5 часов
+    week:
+      en: Week
+      ru: Неделя
+    week_opus:
+      en: Week Opus
+      ru: Неделя Opus
+
+models:
+  missing_cache:
+    en: Claude Code has not written its usage statistics yet.
+    ru: Claude Code ещё не записал статистику использования.
+  totals:
+    sessions:
+      en: Sessions total
+      ru: Сессий всего
+    messages:
+      en: Messages total
+      ru: Сообщений всего
+    first_session:
+      en: First session
+      ru: Первая сессия
+    computed:
+      en: Aggregates computed
+      ru: Агрегаты посчитаны
+  table:
+    title:
+      en: All-time usage per model
+      ru: Расход по моделям за всё время
+    model:
+      en: Model
+      ru: Модель
+    share:
+      en: Share
+      ru: Доля
+    total:
+      en: Total
+      ru: Всего
+    input:
+      en: Input
+      ru: Вход
+    output:
+      en: Output
+      ru: Выход
+    cache:
+      en: Cache
+      ru: Кэш
+
+settings:
+  hook:
+    title:
+      en: Claude Code hook
+      ru: Хук в Claude Code
+    explanation:
+      en: >-
+        Claude Status reads your usage from the Claude Code status line.
+        Register the hook to start collecting, then restart your Claude Code
+        sessions.
+      ru: >-
+        Claude Status берёт данные о расходе из статусной строки Claude Code.
+        Пропишите хук, чтобы начать сбор, и перезапустите сессии Claude Code.
+    state_ours:
+      en: Registered
+      ru: Установлен
+    state_foreign:
+      en: A third-party command is registered
+      ru: Прописана сторонняя команда
+    state_foreign_note:
+      en: Your command will be saved and put back if you remove Claude Status later.
+      ru: Ваша команда сохранится и вернётся, если позже убрать Claude Status.
+    state_absent:
+      en: Not registered — no data is being collected
+      ru: Не установлен — данные не собираются
+    interval:
+      en: Refresh every
+      ru: Обновлять каждые
+    interval_hint:
+      en: (keeps the numbers current while you are not typing)
+      ru: (обновляет цифры, пока вы не работаете в сессии)
+    register:
+      en: Register in Claude Code
+      ru: Прописать в Claude Code
+    replace:
+      en: Replace and register
+      ru: Заменить и прописать
+    remove:
+      en: Remove
+      ru: Убрать
+    applied_note:
+      en: Restart your Claude Code sessions for changes to take effect.
+      ru: Перезапустите сессии Claude Code, чтобы изменения вступили в силу.
+    registered_at:
+      en: "Registered %{path}"
+      ru: "Прописан %{path}"
+    removed:
+      en: The hook has been removed from the Claude Code settings
+      ru: Хук убран из настроек Claude Code
+  statusline:
+    title:
+      en: Status line
+      ru: Статусная строка
+    enabled:
+      en: Print the line in Claude Code
+      ru: Печатать строку в Claude Code
+    colors:
+      en: Colourise (ANSI)
+      ru: Раскрашивать (ANSI)
+    bar_width:
+      en: "Bar width:"
+      ru: "Ширина полос:"
+    preset:
+      en: "Preset:"
+      ru: "Пресет:"
+    preset_custom:
+      en: Custom
+      ru: Свой
+    template:
+      en: "Template:"
+      ru: "Шаблон:"
+    preview:
+      en: "Preview:"
+      ru: "Предпросмотр:"
+    placeholders:
+      en: Placeholders
+      ru: Плейсхолдеры
+  tray:
+    title:
+      en: Tray icon
+      ru: Иконка в трее
+    ring:
+      en: "The ring shows:"
+      ru: "Кольцо показывает:"
+    ring_five_hour:
+      en: 5 hours
+      ru: 5 часов
+    ring_week:
+      en: Week
+      ru: Неделю
+    dot_hint:
+      en: The dot in the middle shows the other limit.
+      ru: Точка в центре — второй лимит.
+    refresh:
+      en: "Refresh every:"
+      ru: "Обновлять каждые:"
+  language:
+    title:
+      en: Language
+      ru: Язык
+    auto:
+      en: System
+      ru: Системный
+    restart_note:
+      en: Applies immediately; the status line follows on its next update.
+      ru: Применяется сразу; статусная строка — со следующего обновления.
+  storage:
+    title:
+      en: Storage
+      ru: Хранение
+    retention:
+      en: "Keep history for:"
+      ru: "Хранить историю:"
+    retention_hint:
+      en: 0 — keep forever
+      ru: 0 — не удалять
+    reset:
+      en: Reset statistics
+      ru: Сбросить статистику
+    reset_hint:
+      en: >-
+        Deletes the collected history. Your settings and the connection to
+        Claude Code stay, and a backup copy is saved first
+      ru: >-
+        Удалит собранную историю. Настройки и подключение к Claude Code
+        останутся, перед удалением сохранится резервная копия
+    reset_confirm:
+      en: Delete the collected history?
+      ru: Удалить собранную историю?
+    reset_yes:
+      en: Delete
+      ru: Удалить
+    reset_no:
+      en: Cancel
+      ru: Отмена
+    reset_done:
+      en: "Deleted %{count} records. Backup: %{backup}"
+      ru: "Удалено записей: %{count}. Резервная копия: %{backup}"
+  save:
+    en: Save settings
+    ru: Сохранить настройки
+  saved:
+    en: Settings saved
+    ru: Настройки сохранены
+
+unit:
+  seconds_suffix:
+    en: " s"
+    ru: " с"
+  days_suffix:
+    en: " d"
+    ru: " дн"
