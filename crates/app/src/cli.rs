@@ -180,7 +180,6 @@ fn preview(template: Option<&str>) -> Result<()> {
         overview: &overview,
         config: &config,
         now,
-        end_of_day: timefmt::end_of_local_day(now),
     };
     let template = template.unwrap_or(&config.statusline.template);
     println!("{}", render::render_template(template, &ctx));

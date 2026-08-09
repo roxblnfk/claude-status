@@ -49,8 +49,6 @@ pub struct RenderContext<'a> {
     pub config: &'a Config,
     /// Render time, unix seconds.
     pub now: i64,
-    /// End of the current local day, unix seconds — for `{today_left}`.
-    pub end_of_day: i64,
 }
 
 /// Assembles the status line using the template from the configuration.
@@ -137,10 +135,7 @@ fn substitute(name: &str, ctx: &RenderContext<'_>) -> Option<String> {
             .week
             .and_then(|w| w.allowance_per_day_pct())
             .map(|p| format!("{p:.1}%"))),
-        "today_left" => opt(ov
-            .week
-            .and_then(|w| w.allowance_until(ctx.end_of_day))
-            .map(|p| format!("{p:.1}%"))),
+        "today_left" => opt(ov.daily.map(|d| format!("{:.1}%", d.remaining_pct()))),
         "burn" => opt(ov
             .week_burn
             .map(|b| tr_args("render.per_day", &[("value", &format!("{:.1}", b.pct_per_day))]))),
@@ -250,7 +245,7 @@ mod tests {
     }
 
     fn ctx<'a>(cfg: &'a Config, ov: &'a Overview, now: i64) -> RenderContext<'a> {
-        RenderContext { input: None, overview: ov, config: cfg, now, end_of_day: now + 3600 }
+        RenderContext { input: None, overview: ov, config: cfg, now }
     }
 
     #[test]

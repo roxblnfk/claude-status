@@ -2,7 +2,7 @@
 
 use claude_status_core::{
     Db, Language,
-    config::{PRESETS, TrayRing},
+    config::PRESETS,
     i18n,
     install::{self, InstallStatus},
     paths,
@@ -237,7 +237,6 @@ fn preview(state: &AppState, template: &str) -> String {
         overview: &state.overview,
         config: &config,
         now,
-        end_of_day: timefmt::end_of_local_day(now),
     };
     render::render_template(template, &ctx)
 }
@@ -275,20 +274,7 @@ fn tray_section(ui: &mut egui::Ui, state: &mut AppState) {
         ui.strong(tr("settings.tray.title"));
         ui.add_space(4.0);
 
-        ui.horizontal(|ui| {
-            ui.label(tr("settings.tray.ring"));
-            ui.selectable_value(
-                &mut state.config.tray.ring,
-                TrayRing::FiveHour,
-                tr("settings.tray.ring_five_hour"),
-            );
-            ui.selectable_value(
-                &mut state.config.tray.ring,
-                TrayRing::Week,
-                tr("settings.tray.ring_week"),
-            );
-        });
-        ui.label(egui::RichText::new(tr("settings.tray.dot_hint")).weak().small());
+        ui.label(egui::RichText::new(tr("settings.tray.icon_hint")).weak().small());
 
         ui.horizontal(|ui| {
             ui.label(tr("settings.tray.refresh"));

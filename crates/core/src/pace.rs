@@ -97,14 +97,6 @@ impl WindowState {
         Some(self.remaining_pct() / remaining_days)
     }
 
-    /// How many percent may be spent between now and `until` while staying on
-    /// the even pace. An `until` beyond the window is clamped to the reset.
-    pub fn allowance_until(&self, until: i64) -> Option<f64> {
-        let per_day = self.allowance_per_day_pct()?;
-        let span = (until.min(self.resets_at) - self.now).max(0) as f64;
-        Some(per_day * span / SECS_PER_DAY)
-    }
-
     /// Usage at the reset if `burn_pct_per_day` holds.
     pub fn projected_used_at_reset(&self, burn_pct_per_day: f64) -> f64 {
         let days_left = self.remaining_secs() as f64 / SECS_PER_DAY;
@@ -125,6 +117,59 @@ impl WindowState {
         }
         let at = self.now + secs_to_full as i64;
         (at < self.resets_at).then_some(at)
+    }
+}
+
+/// Today's share of the weekly limit.
+///
+/// Claude Code reports no daily window at all, so one has to be carved out of
+/// the weekly figure: the ration is whatever was left when the day began,
+/// divided by the days still to come, and the spending is measured from the
+/// level the week stood at at local midnight.
+///
+/// The ration is fixed for the day rather than recomputed every minute. A
+/// ration that shrank as it was being spent would never be reached, and the
+/// gauge built on it would chase its own tail.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DailyBudget {
+    /// Percent of the weekly window spent since local midnight.
+    pub spent_pct: f64,
+    /// Percent of the weekly window today may take.
+    pub allowance_pct: f64,
+    /// Nothing was recorded before midnight, so the starting level had to be
+    /// estimated rather than read.
+    pub estimated: bool,
+}
+
+impl DailyBudget {
+    /// `at_midnight` is the weekly percentage the day started from.
+    pub fn new(week: &WindowState, at_midnight: f64, estimated: bool, midnight: i64) -> Self {
+        // Days including today. Less than one means the week ends before this
+        // day does, and then everything still left may go today.
+        let days = ((week.resets_at - midnight) as f64 / SECS_PER_DAY).max(1.0);
+        Self {
+            spent_pct: (week.used_pct - at_midnight).max(0.0),
+            allowance_pct: ((100.0 - at_midnight) / days).max(0.0),
+            estimated,
+        }
+    }
+
+    /// How much of today's ration is gone. Goes past 1 when it is overspent.
+    pub fn used_fraction(&self) -> f64 {
+        if self.allowance_pct <= 0.0 {
+            return 1.0;
+        }
+        self.spent_pct / self.allowance_pct
+    }
+
+    /// The same as a percentage — what the gauge and its colour are built on.
+    pub fn used_pct(&self) -> f64 {
+        self.used_fraction() * 100.0
+    }
+
+    /// What is left of today's ration, in percent of the weekly window.
+    pub fn remaining_pct(&self) -> f64 {
+        (self.allowance_pct - self.spent_pct).max(0.0)
     }
 }
 
@@ -194,6 +239,9 @@ pub struct Overview {
     pub week_opus: Option<WindowState>,
     /// Actual spending rate of the weekly window.
     pub week_burn: Option<Burn>,
+    /// Today's share of the weekly limit. Filled in by [`crate::db::Db`]: the
+    /// level the day started from is a question only the history can answer.
+    pub daily: Option<DailyBudget>,
     /// When the sample was taken — tells how fresh the data is.
     pub sampled_at: Option<i64>,
 }
@@ -212,6 +260,7 @@ impl Overview {
             week: window_of(current.week_pct, current.week_resets_at, SEVEN_DAY_SECS, now),
             week_opus: window_of(current.opus_pct, current.opus_resets_at, SEVEN_DAY_SECS, now),
             week_burn: week_burn(pace_samples),
+            daily: None,
             sampled_at: Some(current.seen_until()),
         }
     }
@@ -283,10 +332,6 @@ mod tests {
         let w = week(30.0, DAY);
         let per_day = w.allowance_per_day_pct().unwrap();
         assert!((per_day - 70.0 / 6.0).abs() < 1e-6, "{per_day}");
-
-        // Half a day gets half the daily budget.
-        let half = w.allowance_until(DAY + DAY / 2).unwrap();
-        assert!((half - per_day / 2.0).abs() < 1e-6, "{half}");
     }
 
     #[test]
@@ -296,12 +341,31 @@ mod tests {
     }
 
     #[test]
-    fn allowance_until_clamps_to_reset() {
-        let w = week(50.0, 6 * DAY);
-        // Asking for three days ahead while the window closes in one: the
-        // answer must not exceed the whole remaining limit.
-        let budget = w.allowance_until(9 * DAY).unwrap();
-        assert!(budget <= w.remaining_pct() + 1e-6, "{budget}");
+    fn daily_budget_divides_what_was_left_at_midnight() {
+        // Midnight one day into the week: 10 % gone, six days to go, so today
+        // may take 90 / 6 = 15 %. By now 6 % of it is spent.
+        let w = week(16.0, DAY + DAY / 2);
+        let d = DailyBudget::new(&w, 10.0, false, DAY);
+        assert!((d.allowance_pct - 15.0).abs() < 1e-6, "{d:?}");
+        assert!((d.spent_pct - 6.0).abs() < 1e-6, "{d:?}");
+        assert!((d.used_pct() - 40.0).abs() < 1e-6, "{d:?}");
+        assert!((d.remaining_pct() - 9.0).abs() < 1e-6, "{d:?}");
+    }
+
+    #[test]
+    fn the_last_day_may_take_everything_left() {
+        // The week ends this evening: nothing is gained by rationing further.
+        let w = week(70.0, 6 * DAY + DAY / 2);
+        let d = DailyBudget::new(&w, 70.0, false, 6 * DAY + DAY / 4);
+        assert!((d.allowance_pct - 30.0).abs() < 1e-6, "{d:?}");
+    }
+
+    #[test]
+    fn an_overspent_day_reads_past_a_hundred() {
+        let w = week(40.0, DAY + DAY / 2);
+        let d = DailyBudget::new(&w, 10.0, false, DAY);
+        assert!(d.used_pct() > 100.0, "{d:?}");
+        assert_eq!(d.remaining_pct(), 0.0);
     }
 
     #[test]

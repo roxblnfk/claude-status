@@ -81,8 +81,6 @@ pub struct StorageConfig {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct TrayConfig {
-    /// Which window the ring on the icon shows.
-    pub ring: TrayRing,
     /// How often the GUI re-reads the database, in seconds.
     pub refresh_secs: u64,
 }
@@ -104,13 +102,6 @@ pub struct DebugConfig {
     /// so `CLAUDE_STATUS_DUMP` cannot be set for an already running session.
     /// This is the way in that does not require restarting anything.
     pub dump_path: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TrayRing {
-    FiveHour,
-    Week,
 }
 
 impl Default for StatuslineConfig {
@@ -142,7 +133,7 @@ impl Default for StorageConfig {
 
 impl Default for TrayConfig {
     fn default() -> Self {
-        Self { ring: TrayRing::FiveHour, refresh_secs: 20 }
+        Self { refresh_secs: 20 }
     }
 }
 
@@ -213,7 +204,7 @@ mod tests {
     fn roundtrips_through_toml() {
         let mut cfg = Config::default();
         cfg.statusline.template = "{week_pct}".into();
-        cfg.tray.ring = TrayRing::Week;
+        cfg.tray.refresh_secs = 45;
         cfg.ui.language = Language::Ru;
 
         let raw = toml::to_string_pretty(&cfg).unwrap();

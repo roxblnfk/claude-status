@@ -2,9 +2,10 @@
 
 [![CI](https://github.com/roxblnfk/claude-status/actions/workflows/ci.yml/badge.svg)](https://github.com/roxblnfk/claude-status/actions/workflows/ci.yml)
 
-Monitoring how fast Claude Code usage limits are being spent: a tray icon with a
-ring gauge, history in SQLite, and advice on how much can still be spent today
-to land exactly within the weekly window.
+Monitoring how fast Claude Code usage limits are being spent: a tray icon with
+two ring gauges — the session limit and today's budget — history in SQLite, and
+advice on how much can still be spent today to land exactly within the weekly
+window.
 
 *[Русская версия](README.ru.md)*
 
@@ -118,7 +119,7 @@ start of the weekly window to 100 % at the reset:
 
 - `{daily}` — how many percent per day may be spent to land exactly on the
   reset: `remaining / days left`.
-- `{today_left}` — the same budget, scaled to the time until local midnight.
+- `{today_left}` — what is left of today's ration (see below).
 - `{pace}` — deviation from the diagonal in percentage points: `↑+12` means you
   are running 12 pp ahead of schedule.
 - `{burn}` — the actual pace, %/day, averaged from the first reading of the
@@ -129,6 +130,35 @@ start of the weekly window to 100 % at the reset:
   0 % would read as a negative pace. Below half an hour of observation there is
   no pace at all — Claude Code reports whole percents, and one of them over a
   few minutes extrapolates to nonsense.
+
+## Today's budget
+
+Claude Code has no daily window, so one is carved out of the weekly figure.
+
+The day starts from the level the week stood at at local midnight — the highest
+reading recorded before it. Today's ration is whatever was left at that moment,
+divided by the days still to come, and it is then fixed for the day: a ration
+recomputed as it is spent would keep retreating and could never be reached. On
+the last day of the week the division is dropped — everything still left may go
+today.
+
+If collecting started later than the week did there is no reading from before
+midnight, and the level has to be estimated: the usage seen at the first reading
+is spread evenly back over the days since the week began. The **Today** row in
+the window carries a note when the figure rests on that estimate.
+
+## The tray icon
+
+Two concentric gauges, the outer one inscribed in the icon bounds:
+
+| Ring  | Shows                                                  |
+| ----- | ------------------------------------------------------ |
+| outer | the 5-hour session limit                                |
+| inner | how much of today's budget is gone — past 100 % it caps |
+
+Both keep their track, so a ring stays a ring at any fill and the icon never
+turns into a solid disc. The colour follows the level: green, yellow past a
+half, orange past three quarters, red past 90 %.
 
 ## Localisation
 

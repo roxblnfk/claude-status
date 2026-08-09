@@ -322,9 +322,9 @@ tray:
     week_expired:
       en: week — window reset, no data yet
       ru: нед — окно сброшено, данных нет
-    allowance:
-      en: "budget %{pct}%/day"
-      ru: "норма %{pct}%/сут"
+    today:
+      en: "today %{spent}% of %{allowance}%"
+      ru: "сегодня %{spent}% из %{allowance}%"
     no_data:
       en: no data — connect to Claude Code
       ru: нет данных — подключите Claude Code
@@ -455,14 +455,29 @@ overview:
       en: "%{pct}% — to land exactly within the remaining %{left}"
       ru: "%{pct}% — чтобы ровно уложиться в оставшиеся %{left}"
     today:
-      en: Still available today
-      ru: Можно ещё сегодня
+      en: Today
+      ru: Сегодня
     today_hint:
-      en: The daily budget, scaled to the hours left before midnight.
-      ru: Та же норма, пересчитанная на часы, оставшиеся до полуночи.
+      en: >-
+        Counted from the level the week stood at at midnight. The ration is set
+        once for the day and does not move as it is being spent — this is what
+        the inner ring of the tray icon shows.
+      ru: >-
+        Считается от уровня, на котором неделя стояла в полночь. Норма
+        назначается на день один раз и не уползает по мере трат — именно её
+        показывает внутреннее кольцо иконки в трее.
     today_value:
-      en: "%{pct}% (until midnight)"
-      ru: "%{pct}% (до полуночи)"
+      en: "%{spent}% of %{allowance}% — %{left}% left"
+      ru: "%{spent}% из %{allowance}% — осталось %{left}%"
+    today_estimated:
+      en: >-
+        Collecting started later than this week did, so the level at midnight is
+        an estimate: the usage seen at the first reading, spread evenly back
+        over the week.
+      ru: >-
+        Сбор данных начался позже, чем эта неделя, поэтому уровень на полночь
+        оценён: расход из первого снимка, равномерно разложенный назад по
+        неделе.
     pace:
       en: Average spending
       ru: Расход в среднем
@@ -676,18 +691,9 @@ settings:
     title:
       en: Tray icon
       ru: Иконка в трее
-    ring:
-      en: "The ring shows:"
-      ru: "Кольцо показывает:"
-    ring_five_hour:
-      en: 5 hours
-      ru: 5 часов
-    ring_week:
-      en: Week
-      ru: Неделю
-    dot_hint:
-      en: The dot in the middle shows the other limit.
-      ru: Точка в центре — второй лимит.
+    icon_hint:
+      en: The outer ring is the 5-hour session, the inner one is today's budget.
+      ru: Внешнее кольцо — пятичасовая сессия, внутреннее — норма на сегодня.
     refresh:
       en: "Refresh every:"
       ru: "Обновлять каждые:"

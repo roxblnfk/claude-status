@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::paths;
-use crate::statusline::StatuslineInput;
+use crate::statusline::{SEVEN_DAY_SECS, StatuslineInput};
 use crate::tr_args;
 
 /// A snapshot of the limit state at a point in time.
@@ -326,12 +326,69 @@ impl Db {
         })
     }
 
-    /// The summary every entry point shows: current state plus the pace.
+    /// The weekly percentage the day beginning at `midnight` started from.
+    ///
+    /// The flag says the level was estimated rather than read: it is `false`
+    /// when a reading from before midnight exists, or when the week itself
+    /// began after midnight and therefore stood at zero.
+    pub fn week_baseline(&self, resets_at: i64, midnight: i64) -> Result<Option<(f64, bool)>> {
+        // The highest reading before midnight, for the same reason the current
+        // state is a maximum: idle sessions keep repeating stale snapshots.
+        let recorded: Option<f64> = self.conn.query_row(
+            "SELECT MAX(week_pct) FROM samples
+             WHERE week_resets_at IS ?1 AND ts <= ?2 AND week_pct IS NOT NULL",
+            params![resets_at, midnight],
+            |row| row.get(0),
+        )?;
+        if let Some(pct) = recorded {
+            return Ok(Some((pct, false)));
+        }
+
+        let window_start = resets_at - SEVEN_DAY_SECS;
+        if window_start >= midnight {
+            return Ok(Some((0.0, false)));
+        }
+
+        // Nothing was recorded before midnight — collecting started later than
+        // the week did. The best that can be said is that the usage seen at the
+        // first reading accumulated evenly since the week began.
+        let first: Option<(i64, f64)> = self
+            .conn
+            .query_row(
+                "SELECT ts, week_pct FROM samples
+                 WHERE week_resets_at IS ?1 AND week_pct IS NOT NULL
+                 ORDER BY ts, id LIMIT 1",
+                params![resets_at],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((ts, pct)) = first else { return Ok(None) };
+
+        let observed = (ts - window_start) as f64;
+        if observed <= 0.0 {
+            return Ok(Some((0.0, true)));
+        }
+        let share = ((midnight - window_start) as f64 / observed).clamp(0.0, 1.0);
+        Ok(Some((pct * share, true)))
+    }
+
+    /// The summary every entry point shows: current state, pace and today's
+    /// share of the week.
     pub fn overview(&self, now: i64) -> Result<crate::pace::Overview> {
         let Some(current) = self.current_sample()? else {
             return Ok(crate::pace::Overview::default());
         };
-        Ok(crate::pace::Overview::new(&current, &self.burn_endpoints()?, now))
+        let mut overview = crate::pace::Overview::new(&current, &self.burn_endpoints()?, now);
+
+        if let Some(week) = overview.week.filter(|w| !w.is_expired()) {
+            let midnight = crate::timefmt::start_of_local_day(now);
+            overview.daily = self.week_baseline(week.resets_at, midnight)?.map(
+                |(at_midnight, estimated)| {
+                    crate::pace::DailyBudget::new(&week, at_midnight, estimated, midnight)
+                },
+            );
+        }
+        Ok(overview)
     }
 
     /// Stores the daily token breakdown per model (from `stats-cache.json`).
@@ -642,6 +699,50 @@ mod tests {
         assert_eq!(bounds.len(), 2);
         assert_eq!(bounds[0].ts, 200, "a point from the previous window is excluded");
         assert_eq!(bounds[1].ts, 300);
+    }
+
+    /// A week that began at t=10_000, so the dates below sit inside it.
+    const WEEK_RESETS: i64 = SEVEN_DAY_SECS + 10_000;
+
+    #[test]
+    fn baseline_is_the_level_recorded_before_midnight() {
+        let db = Db::open_in_memory().unwrap();
+        db.record(&input(10.0, 20.0, WEEK_RESETS), 20_000).unwrap();
+        db.record(&input(20.0, 30.0, WEEK_RESETS), 40_000).unwrap();
+
+        let (pct, estimated) = db.week_baseline(WEEK_RESETS, 30_000).unwrap().unwrap();
+        assert_eq!(pct, 20.0);
+        assert!(!estimated, "the level was read, not guessed");
+    }
+
+    #[test]
+    fn baseline_is_zero_when_the_week_began_after_midnight() {
+        let db = Db::open_in_memory().unwrap();
+        db.record(&input(10.0, 20.0, WEEK_RESETS), 20_000).unwrap();
+
+        // Midnight came before the window existed, so it started the day empty.
+        let (pct, estimated) = db.week_baseline(WEEK_RESETS, 5_000).unwrap().unwrap();
+        assert_eq!(pct, 0.0);
+        assert!(!estimated);
+    }
+
+    #[test]
+    fn baseline_is_estimated_when_collecting_started_late() {
+        let db = Db::open_in_memory().unwrap();
+        // The week began at 10_000, the first reading is at 50_000 and shows
+        // 40 %. Midnight at 30_000 is halfway through that stretch, so about
+        // half of the 40 % is assumed to have been there already.
+        db.record(&input(10.0, 40.0, WEEK_RESETS), 50_000).unwrap();
+
+        let (pct, estimated) = db.week_baseline(WEEK_RESETS, 30_000).unwrap().unwrap();
+        assert!((pct - 20.0).abs() < 1e-6, "{pct}");
+        assert!(estimated, "there was nothing to read it from");
+    }
+
+    #[test]
+    fn baseline_is_absent_without_any_sample() {
+        let db = Db::open_in_memory().unwrap();
+        assert_eq!(db.week_baseline(WEEK_RESETS, 30_000).unwrap(), None);
     }
 
     #[test]

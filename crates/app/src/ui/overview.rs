@@ -31,7 +31,7 @@ pub fn draw(ui: &mut egui::Ui, state: &AppState) -> Option<Tab> {
         // The advice is about the current week; once it has rolled over there
         // is nothing to divide between the remaining days.
         if let Some(w) = state.overview.week.filter(|w| !w.is_expired()) {
-            budget_card(ui, state, &w, now);
+            budget_card(ui, state, &w);
         }
 
         ui.add_space(8.0);
@@ -185,7 +185,7 @@ fn usage_bar(ui: &mut egui::Ui, used_pct: f64) {
 }
 
 /// The "how much may I spend" card — the reason the pace is computed at all.
-fn budget_card(ui: &mut egui::Ui, state: &AppState, w: &WindowState, now: i64) {
+fn budget_card(ui: &mut egui::Ui, state: &AppState, w: &WindowState) {
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.strong(tr("overview.budget.title"));
@@ -210,12 +210,24 @@ fn budget_card(ui: &mut egui::Ui, state: &AppState, w: &WindowState, now: i64) {
             ui.end_row();
 
             ui.label(tr("overview.budget.today")).on_hover_text(tr("overview.budget.today_hint"));
-            match w.allowance_until(timefmt::end_of_local_day(now)) {
-                Some(left) => ui.label(tr_args(
-                    "overview.budget.today_value",
-                    &[("pct", &format!("{left:.1}"))],
-                )),
-                None => ui.label("—"),
+            match state.overview.daily {
+                Some(d) => {
+                    let text = tr_args(
+                        "overview.budget.today_value",
+                        &[
+                            ("spent", &format!("{:.1}", d.spent_pct)),
+                            ("allowance", &format!("{:.1}", d.allowance_pct)),
+                            ("left", &format!("{:.1}", d.remaining_pct())),
+                        ],
+                    );
+                    let label = ui.colored_label(level_color(d.used_pct()), text);
+                    if d.estimated {
+                        label.on_hover_text(tr("overview.budget.today_estimated"));
+                    }
+                }
+                None => {
+                    ui.label("—");
+                }
             };
             ui.end_row();
 
@@ -274,7 +286,7 @@ fn budget_card(ui: &mut egui::Ui, state: &AppState, w: &WindowState, now: i64) {
 
         // The numbers above answer "how much"; this line answers "so what do I
         // do" — the question the card exists for.
-        if let Some((advice, color)) = advice(state, w, now) {
+        if let Some((advice, color)) = advice(state, w) {
             ui.add_space(6.0);
             ui.separator();
             ui.add_space(2.0);
@@ -290,9 +302,9 @@ fn budget_card(ui: &mut egui::Ui, state: &AppState, w: &WindowState, now: i64) {
 ///
 /// `None` when the window is about to reset and a daily rate has stopped making
 /// sense.
-fn advice(state: &AppState, w: &WindowState, now: i64) -> Option<(String, Option<egui::Color32>)> {
+fn advice(state: &AppState, w: &WindowState) -> Option<(String, Option<egui::Color32>)> {
     let per_day = format!("{:.1}", w.allowance_per_day_pct()?);
-    let today = format!("{:.1}", w.allowance_until(timefmt::end_of_local_day(now))?);
+    let today = format!("{:.1}", state.overview.daily?.remaining_pct());
 
     if let Some(burn) = state.overview.week_burn
         && let Some(at) = w.exhausted_at(burn.pct_per_day)

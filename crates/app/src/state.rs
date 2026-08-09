@@ -3,9 +3,8 @@
 use anyhow::Result;
 use claude_status_core::{
     Config, Db, Sample,
-    config::TrayRing,
     install::{self, InstallStatus},
-    pace::{Overview, WindowState},
+    pace::Overview,
     stats_cache::StatsCache,
     timefmt, tr, tr_args,
 };
@@ -96,20 +95,14 @@ impl AppState {
         Ok(())
     }
 
-    /// The window the icon ring shows.
-    pub fn ring_window(&self) -> Option<WindowState> {
-        match self.config.tray.ring {
-            TrayRing::FiveHour => self.overview.five_hour,
-            TrayRing::Week => self.overview.week,
-        }
+    /// The outer ring of the icon: the session limit.
+    pub fn session_gauge(&self) -> Option<f64> {
+        self.overview.five_hour.and_then(|w| w.live_used_pct())
     }
 
-    /// The other window — the dot in the centre of the icon.
-    pub fn dot_window(&self) -> Option<WindowState> {
-        match self.config.tray.ring {
-            TrayRing::FiveHour => self.overview.week,
-            TrayRing::Week => self.overview.five_hour,
-        }
+    /// The inner ring: how much of today's budget is gone.
+    pub fn daily_gauge(&self) -> Option<f64> {
+        self.overview.daily.map(|d| d.used_pct())
     }
 
     /// The tray label.
@@ -137,12 +130,15 @@ impl AppState {
                 ),
                 None => tr("tray.tooltip.week_expired"),
             });
-            if let Some(per_day) = w.allowance_per_day_pct() {
-                lines.push(tr_args(
-                    "tray.tooltip.allowance",
-                    &[("pct", &format!("{per_day:.1}"))],
-                ));
-            }
+        }
+        if let Some(d) = self.overview.daily {
+            lines.push(tr_args(
+                "tray.tooltip.today",
+                &[
+                    ("spent", &format!("{:.1}", d.spent_pct)),
+                    ("allowance", &format!("{:.1}", d.allowance_pct)),
+                ],
+            ));
         }
 
         match self.overview.staleness_secs(now) {
@@ -168,7 +164,7 @@ fn truncate_chars(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claude_status_core::statusline::SEVEN_DAY_SECS;
+    use claude_status_core::{pace::DailyBudget, statusline::SEVEN_DAY_SECS};
 
     fn overview_with(five: Option<f64>, week: Option<f64>, now: i64) -> Overview {
         let sample = Sample {
@@ -204,7 +200,7 @@ mod tests {
         let tip = state.tooltip();
         assert!(tip.contains("52%"), "{tip}");
         assert!(tip.contains("41%"), "{tip}");
-        assert_eq!(tip.lines().count(), 4, "title, two windows and the budget: {tip}");
+        assert_eq!(tip.lines().count(), 3, "title and the two windows: {tip}");
     }
 
     #[test]
@@ -248,16 +244,24 @@ mod tests {
     }
 
     #[test]
-    fn ring_and_dot_follow_the_setting() {
+    fn the_outer_gauge_is_the_session_the_inner_one_is_today() {
         let now = timefmt::now();
-        let mut state = state_with(overview_with(Some(52.0), Some(41.0), now));
+        let mut overview = overview_with(Some(52.0), Some(41.0), now);
+        overview.daily = Some(DailyBudget {
+            spent_pct: 3.0,
+            allowance_pct: 12.0,
+            estimated: false,
+        });
+        let state = state_with(overview);
 
-        state.config.tray.ring = TrayRing::FiveHour;
-        assert_eq!(state.ring_window().unwrap().used_pct, 52.0);
-        assert_eq!(state.dot_window().unwrap().used_pct, 41.0);
+        assert_eq!(state.session_gauge(), Some(52.0));
+        assert_eq!(state.daily_gauge(), Some(25.0));
+    }
 
-        state.config.tray.ring = TrayRing::Week;
-        assert_eq!(state.ring_window().unwrap().used_pct, 41.0);
-        assert_eq!(state.dot_window().unwrap().used_pct, 52.0);
+    #[test]
+    fn the_inner_gauge_is_absent_without_a_daily_budget() {
+        let now = timefmt::now();
+        let state = state_with(overview_with(Some(52.0), Some(41.0), now));
+        assert_eq!(state.daily_gauge(), None);
     }
 }

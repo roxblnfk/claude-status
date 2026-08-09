@@ -65,7 +65,6 @@ fn run(raw: &str, config: &Config) -> anyhow::Result<Option<String>> {
         overview: &overview,
         config,
         now,
-        end_of_day: timefmt::end_of_local_day(now),
     };
     Ok(Some(render::render(&ctx)))
 }
