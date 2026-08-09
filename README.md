@@ -1,6 +1,6 @@
 # claude-status
 
-[![CI](https://github.com/roxblnfk/claude-status/actions/workflows/ci.yml/badge.svg)](https://github.com/roxblnfk/claude-status/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/roxblnfk/claude-status/ci.yml?branch=master&style=flat-square&label=CI&logo=github)](https://github.com/roxblnfk/claude-status/actions/workflows/ci.yml)
 ![Vibe Index](https://img.shields.io/badge/Indexing%20Vibe-6168e5?style=flat-square)
 
 Monitoring how fast Claude Code usage limits are being spent: a tray icon with
