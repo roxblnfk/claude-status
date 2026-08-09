@@ -16,8 +16,10 @@ const ROW_HEIGHT: f32 = 22.0;
 
 /// Width of a numeric column. Enough for `994.9M` and the widest header.
 const NUMERIC_COLUMN: f32 = 78.0;
-/// Width of the share bar column.
-const SHARE_COLUMN: f32 = 60.0;
+/// Width of the share bar column. Above egui's 96 px floor for a progress bar:
+/// below it the widget still asks for 96 and the table clips the overflow,
+/// which is what square-ends off the right side of the bar.
+const SHARE_COLUMN: f32 = 120.0;
 /// Lower bound for the model name before the table starts scrolling sideways.
 const MIN_NAME_COLUMN: f32 = 140.0;
 
@@ -91,10 +93,14 @@ fn models_table(ui: &mut egui::Ui, stats: &StatsCache) {
         .auto_shrink([false, false])
         .header(ROW_HEIGHT, |mut header| {
             header.col(|ui| {
-                ui.strong(tr("models.table.model"));
+                centered(ui, |ui| {
+                    ui.strong(tr("models.table.model"));
+                });
             });
             header.col(|ui| {
-                ui.strong(tr("models.table.share"));
+                centered(ui, |ui| {
+                    ui.strong(tr("models.table.share"));
+                });
             });
             for key in [
                 "models.table.total",
@@ -114,15 +120,23 @@ fn models_table(ui: &mut egui::Ui, stats: &StatsCache) {
                 let (name, usage) = ranked[row.index()];
 
                 row.col(|ui| {
-                    ui.label(name);
+                    centered(ui, |ui| {
+                        ui.label(name);
+                    });
                 });
                 // The bar gives scale: the busiest model usually has orders of
                 // magnitude more tokens than the rest.
                 row.col(|ui| {
-                    ui.add(
-                        egui::ProgressBar::new(usage.total() as f32 / max_total as f32)
-                            .desired_height(6.0),
-                    );
+                    centered(ui, |ui| {
+                        // Stated rather than left to the widget: unasked, it
+                        // demands 96 px whatever the cell can spare.
+                        let width = ui.available_width();
+                        ui.add(
+                            egui::ProgressBar::new(usage.total() as f32 / max_total as f32)
+                                .desired_width(width)
+                                .desired_height(8.0),
+                        );
+                    });
                 });
                 for value in [
                     usage.total(),
@@ -146,6 +160,14 @@ fn reserved_width(ui: &egui::Ui) -> f32 {
     const COLUMNS: usize = 6;
     let spacing = ui.spacing().item_spacing.x * (COLUMNS - 1) as f32;
     SHARE_COLUMN + 4.0 * NUMERIC_COLUMN + spacing + ui.spacing().scroll.bar_width
+}
+
+/// Puts cell contents on the row's centre line.
+///
+/// A table cell lays its contents out from the top, which a 22 px row makes
+/// plain: text sits high and a thin bar clings to the ceiling.
+fn centered(ui: &mut egui::Ui, contents: impl FnOnce(&mut egui::Ui)) {
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), contents);
 }
 
 /// Numbers read as a column only when they line up on the right.
