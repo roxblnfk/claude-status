@@ -7,11 +7,11 @@ use tiny_skia::{Color, LineCap, Paint, PathBuilder, Pixmap, Stroke, Transform};
 pub const SIZE: u32 = 64;
 
 /// Ring thickness, as a share of the icon side.
-const STROKE: f32 = 0.155;
-/// Clearance between the two rings. Wide enough that at a 16 px tray size,
-/// where the whole icon is a quarter of this, the seam still shows when both
-/// gauges are full and the same colour.
-const GAP: f32 = 0.075;
+const STROKE: f32 = 0.13;
+/// Clearance between the two rings. Kept just wide enough that at a 16 px tray
+/// size, where the whole icon is a quarter of this, the seam still shows when
+/// both gauges are full and the same colour.
+const GAP: f32 = 0.05;
 
 /// A finished icon: RGBA8, `SIZE`×`SIZE`.
 pub struct Rgba {
