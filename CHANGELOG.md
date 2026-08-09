@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.0](https://github.com/roxblnfk/claude-status/compare/v1.1.0...v1.2.0) (2026-08-09)
+
+
+### Features
+
+* ship one binary instead of two ([35b9e67](https://github.com/roxblnfk/claude-status/commit/35b9e6706795837993a18edaf2be79fcf74b3beb))
+* split the settings into pages ([0179129](https://github.com/roxblnfk/claude-status/commit/01791297771d7a7a9d8f63d79c0699d5f583b6b5))
+* update in place from the GitHub releases ([f931965](https://github.com/roxblnfk/claude-status/commit/f9319654951f50082c3379dcbe63228a3c4cf3de))
+
+
+### Documentation
+
+* render both badges in one style ([8eea6f4](https://github.com/roxblnfk/claude-status/commit/8eea6f4b3ae5e852c17d293b8e8ddd7e231e3873))
+
 ## [1.1.0](https://github.com/roxblnfk/claude-status/compare/v1.0.0...v1.1.0) (2026-08-09)
 
 
