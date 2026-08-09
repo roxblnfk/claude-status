@@ -95,7 +95,12 @@ fn limits_plot(ui: &mut egui::Ui, history: &[Sample]) {
         // panning to, so the axis is pinned instead of auto-fitted.
         .default_y_bounds(0.0, 100.0)
         .default_x_bounds(0.0, span_hours)
-        .x_axis_formatter(move |mark, _| timefmt::clock(origin + (mark.value * 3600.0) as i64))
+        // Past a couple of days the time of day says nothing about which point
+        // is which; the date does.
+        .x_axis_formatter(move |mark, _| {
+            let ts = origin + (mark.value * 3600.0) as i64;
+            if span_hours > 48.0 { timefmt::date(ts) } else { timefmt::clock(ts) }
+        })
         .label_formatter(move |hover| {
             let (HoverPosition::NearDataPoint { position, .. }
             | HoverPosition::Elsewhere { position }) = hover;
@@ -103,9 +108,14 @@ fn limits_plot(ui: &mut egui::Ui, history: &[Sample]) {
         });
 
     plot.show(ui, |plot_ui| {
-        // Re-applied every frame: `default_y_bounds` only seeds the first one,
-        // after which a resize can drift the view below zero.
+        // Re-applied every frame: the `default_*` bounds only seed the very
+        // first one, and a plot keeps its view in egui's memory ever after.
+        // Without this the period buttons changed the data underneath a frozen
+        // week-wide viewport — a day drawn into a seventh of the width, a month
+        // running off the right edge.
         plot_ui.set_plot_bounds_y(0.0..=100.0);
+        let margin = span_hours * 0.02;
+        plot_ui.set_plot_bounds_x(-margin..=span_hours + margin);
         for (name, points) in series_names.iter().zip(all) {
             plot_ui.line(Line::new(name.clone(), PlotPoints::from(points)).width(2.0));
         }
