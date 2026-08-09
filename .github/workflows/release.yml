@@ -35,8 +35,10 @@ jobs:
           # 22.04 keeps the binary usable on distributions with an older glibc.
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-22.04
+          # Cross-compiled from the Apple Silicon runner: the Intel ones are
+          # being retired and a job asking for one sits in the queue forever.
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-latest
           - target: aarch64-apple-darwin
             os: macos-latest
     steps:
