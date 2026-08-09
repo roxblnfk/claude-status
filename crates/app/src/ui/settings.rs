@@ -13,8 +13,43 @@ use eframe::egui;
 
 use crate::state::{AppState, UpdateStage};
 
+/// Which page of the settings is open.
+///
+/// One screen of eight boxes made the scroll bar the only way to find
+/// anything, and put the Save button a long way from most of what it saves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Page {
+    /// Where the figures come from.
+    #[default]
+    Source,
+    Statusline,
+    /// How the program itself behaves.
+    Program,
+    Update,
+}
+
+impl Page {
+    fn label(self) -> String {
+        match self {
+            Page::Source => tr("settings.page.source"),
+            Page::Statusline => tr("settings.page.statusline"),
+            Page::Program => tr("settings.page.program"),
+            Page::Update => tr("settings.page.update"),
+        }
+    }
+
+    /// Whether the page holds anything written to `config.toml`, and so needs
+    /// the Save button. Everything on the update page acts at once.
+    fn has_settings(self) -> bool {
+        !matches!(self, Page::Update)
+    }
+
+    const ALL: [Page; 4] = [Page::Source, Page::Statusline, Page::Program, Page::Update];
+}
+
 /// Widget state that survives between frames.
 pub struct SettingsState {
+    page: Page,
     /// The template being edited. Kept apart from the configuration so that
     /// edits apply on a button press rather than on every keystroke.
     template: Option<String>,
@@ -27,45 +62,74 @@ pub struct SettingsState {
 
 impl Default for SettingsState {
     fn default() -> Self {
-        Self { template: None, refresh_interval: 60, message: None, confirming_reset: false }
+        Self {
+            page: Page::default(),
+            template: None,
+            refresh_interval: 60,
+            message: None,
+            confirming_reset: false,
+        }
     }
 }
 
 pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut SettingsState) {
+    ui.horizontal(|ui| {
+        for page in Page::ALL {
+            if ui.selectable_label(ui_state.page == page, page.label()).clicked() {
+                ui_state.page = page;
+                // What the last action reported belongs to the page it was
+                // taken on; carried over it reads as a comment on this one.
+                ui_state.message = None;
+                ui_state.confirming_reset = false;
+            }
+        }
+    });
+    ui.add_space(8.0);
+
+    let page = ui_state.page;
     let template = ui_state
         .template
         .get_or_insert_with(|| state.config.statusline.template.clone());
 
     egui::ScrollArea::vertical().show(ui, |ui| {
-        hook_section(ui, state, &mut ui_state.refresh_interval, &mut ui_state.message);
-        ui.add_space(12.0);
-        statusline_section(ui, state, template);
-        ui.add_space(12.0);
-        language_section(ui, state);
-        ui.add_space(12.0);
-        tray_section(ui, state);
-        ui.add_space(12.0);
-        autostart_section(ui, state, &mut ui_state.message);
-        ui.add_space(12.0);
-        update_section(ui, state);
-        ui.add_space(12.0);
-        probe_section(ui, state);
-        ui.add_space(12.0);
-        storage_section(ui, state, &mut ui_state.confirming_reset, &mut ui_state.message);
-        ui.add_space(12.0);
+        match page {
+            Page::Source => {
+                hook_section(ui, state, &mut ui_state.refresh_interval, &mut ui_state.message);
+                ui.add_space(12.0);
+                probe_section(ui, state);
+            }
+            Page::Statusline => statusline_section(ui, state, template),
+            Page::Program => {
+                language_section(ui, state);
+                ui.add_space(12.0);
+                tray_section(ui, state);
+                ui.add_space(12.0);
+                autostart_section(ui, state, &mut ui_state.message);
+                ui.add_space(12.0);
+                storage_section(ui, state, &mut ui_state.confirming_reset, &mut ui_state.message);
+            }
+            Page::Update => update_section(ui, state),
+        }
 
-        ui.horizontal(|ui| {
-            if ui.button(tr("settings.save")).clicked() {
-                state.config.statusline.template = template.clone();
-                ui_state.message = Some(match state.config.save() {
-                    Ok(()) => Ok(tr("settings.saved")),
-                    Err(e) => Err(format!("{e:#}")),
-                });
-            }
-            if let Ok(path) = paths::config_path() {
-                ui.label(egui::RichText::new(path.display().to_string()).weak().small());
-            }
-        });
+        if page.has_settings() {
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                if ui.button(tr("settings.save")).clicked() {
+                    // The template goes in whichever page the button was
+                    // pressed on: an edit left in the box is still an edit,
+                    // and losing it on a tab switch would be worse than
+                    // saving it early.
+                    state.config.statusline.template = template.clone();
+                    ui_state.message = Some(match state.config.save() {
+                        Ok(()) => Ok(tr("settings.saved")),
+                        Err(e) => Err(format!("{e:#}")),
+                    });
+                }
+                if let Ok(path) = paths::config_path() {
+                    ui.label(egui::RichText::new(path.display().to_string()).weak().small());
+                }
+            });
+        }
 
         if let Some(message) = &ui_state.message {
             ui.add_space(6.0);
@@ -384,6 +448,15 @@ fn update_section(ui: &mut egui::Ui, state: &mut AppState) {
             if busy {
                 ui.spinner();
             }
+        });
+
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(tr("settings.update.source")).weak().small());
+            ui.hyperlink_to(
+                egui::RichText::new(update::REPO).small(),
+                format!("https://github.com/{}", update::REPO),
+            );
         });
 
         let note = match state.update_stage() {

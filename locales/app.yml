@@ -713,6 +713,19 @@ models:
       ru: Кэш
 
 settings:
+  page:
+    source:
+      en: Data source
+      ru: Источник данных
+    statusline:
+      en: Status line
+      ru: Статусная строка
+    program:
+      en: Program
+      ru: Приложение
+    update:
+      en: Update
+      ru: Обновление
   hook:
     title:
       en: Claude Code hook
@@ -815,12 +828,18 @@ settings:
       ru: Версия
     explanation:
       en: >-
-        The program is downloaded by hand, so it does not learn about a new
-        release on its own. Checking asks GitHub; nothing goes over the network
-        until you press the button.
+        New versions are taken from the GitHub releases and installed in place:
+        the download replaces this binary where it stands, so nothing has to be
+        moved or registered again afterwards. Only the check is manual —
+        nothing reaches the network until the button is pressed.
       ru: >-
-        Приложение скачивается вручную и само о новой версии не узнаёт. Проверка
-        спрашивает GitHub; до нажатия кнопки в сеть ничего не уходит.
+        Новые версии берутся из релизов на GitHub и ставятся автоматически:
+        загруженный файл заменяет текущий там, где он лежит, — ничего
+        перекладывать и прописывать заново не нужно. Вручную только проверка:
+        до нажатия кнопки в сеть ничего не уходит.
+    source:
+      en: "Source and releases:"
+      ru: "Исходники и релизы:"
     current:
       en: "Installed: %{version}"
       ru: "Установлена: %{version}"

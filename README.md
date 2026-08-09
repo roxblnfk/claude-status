@@ -98,8 +98,9 @@ these hold:
   that has already reset.
 
 While the status line keeps arriving, no request is made at all. `claude-status
-probe` forces one, and the **Settings** tab has a button. `CLAUDE_STATUS_CLAUDE_BIN`
-points at the executable if it is not where the native installer puts it.
+probe` forces one, and there is a button under **Settings → Data source**.
+`CLAUDE_STATUS_CLAUDE_BIN` points at the executable if it is not where the
+native installer puts it.
 
 The API is marked unstable in the SDK and may change without notice; a failed
 request is reported and otherwise ignored.
@@ -160,9 +161,9 @@ applies to an installation made by a release that still had a separate
 
 ## The status line
 
-The template is configured in the window (**Settings** tab, with a live preview,
-seven ready-made presets and the placeholder reference) or directly in
-`config.toml`. The default:
+The template is configured in the window (**Settings → Status line**, with a
+live preview, seven ready-made presets and the placeholder reference) or
+directly in `config.toml`. The default:
 
 ```
 {model} · ctx {ctx_pct}% · 5h {five_bar} {five_pct}% (⟳{five_reset}) · week {week_pct}% {pace}
@@ -233,7 +234,7 @@ half, orange past three quarters, red past 90 %.
 
 ## Starting with the session
 
-**Settings → Autostart** registers the program with the operating system: a
+**Settings → Program → Autostart** registers the program with the operating system: a
 value under `HKCU\...\CurrentVersion\Run` on Windows, a `.desktop` file in
 `~/.config/autostart` on Linux, a launch agent in `~/Library/LaunchAgents` on
 macOS. The entry carries `--tray`, so a login brings up the icon and no window.
@@ -246,10 +247,12 @@ instead of quietly reporting the autostart as off.
 
 ## Updating
 
-**Settings → Version** carries one button through the whole thing: it offers to
-check, then to download what the check found, then to restart into it. Nothing
-reaches the network until it is pressed — a usage monitor has no business
-phoning home unasked. `claude-status update` does the same from a shell.
+**Settings → Update** carries one button through the whole thing: it offers to
+check, then to download what the check found, then to restart into it. The
+download replaces the running binary where it stands, so nothing has to be moved
+or registered again afterwards. Only the check is manual — nothing reaches the
+network until the button is pressed. `claude-status update` does the same from a
+shell.
 
 Every release publishes the loose executable beside the archives, and that is
 what gets fetched: no unpacking, so no archive format inside the program. The
@@ -291,7 +294,7 @@ adding a variant to every key plus an entry in `Language` in
 Samples collapse: a new row appears only when the percentages or the window
 boundaries change, compared per session — otherwise the hook would pile up
 duplicates on every message. They are kept for 180 days (configurable, `0` —
-forever), and **Settings → Storage → Reset statistics** wipes them on demand.
+forever), and **Settings → Program → Reset statistics** wipes them on demand.
 
 ## Several sessions at once
 
