@@ -125,14 +125,31 @@ pub fn run(timeout: Duration) -> Result<Usage> {
 }
 
 fn spawn(exe: &PathBuf) -> Result<Child> {
-    Command::new(exe)
+    let mut command = Command::new(exe);
+    command
         .args(["--print", "--input-format", "stream-json", "--output-format", "stream-json"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .with_context(|| tr("probe.error.spawn"))
+        .stderr(Stdio::null());
+    hide_console(&mut command);
+    command.spawn().with_context(|| tr("probe.error.spawn"))
 }
+
+/// Keeps the probe from flashing a console window.
+///
+/// Claude Code is a console program, so Windows gives it a window of its own
+/// whatever the parent is — a black rectangle appearing and vanishing every
+/// quarter of an hour. All three streams are redirected anyway, so nothing is
+/// lost by denying it one.
+#[cfg(windows)]
+fn hide_console(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn hide_console(_command: &mut Command) {}
 
 /// Where to find Claude Code.
 ///
