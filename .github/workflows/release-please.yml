@@ -26,6 +26,26 @@ jobs:
           manifest-file: .release-please-manifest.json
           target-branch: ${{ github.ref_name }}
 
+      # The Vibe Index badge rides along in the release pull request instead of
+      # landing on the default branch by itself: one badge commit per release
+      # rather than one per push, and the figure is reviewable before it ships.
+      # Checking the pull request branch out is what puts the commit there —
+      # the action pushes to whatever HEAD points at.
+      - uses: actions/checkout@v4
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        with:
+          # The score is read from the commit history; a shallow clone would
+          # score whatever slice of it the runner happened to fetch.
+          fetch-depth: 0
+          ref: ${{ fromJson(steps.release.outputs.pr).headBranchName }}
+
+      - uses: roxblnfk/action-vibe-index@v1
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        with:
+          update-files: README.md,README.ru.md
+          commit: true
+          push: true
+
   binaries:
     name: Build binaries
     needs: release-please

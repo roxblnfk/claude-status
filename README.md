@@ -1,6 +1,7 @@
 # claude-status
 
 [![CI](https://github.com/roxblnfk/claude-status/actions/workflows/ci.yml/badge.svg)](https://github.com/roxblnfk/claude-status/actions/workflows/ci.yml)
+![Vibe Index](https://img.shields.io/badge/Indexing%20Vibe-6168e5?style=flat-square)
 
 Monitoring how fast Claude Code usage limits are being spent: a tray icon with
 two ring gauges — the session limit and today's budget — history in SQLite, and
@@ -320,3 +321,9 @@ merging it tags the release and builds the binaries for all platforms.
 The version is stored in `version.txt` and in `Cargo.toml` (the line marked
 `x-release-please-version`) — both are updated by that pull request, so neither
 should be edited by hand.
+
+The same pull request carries a refreshed [Vibe
+Index](https://github.com/roxblnfk/action-vibe-index) badge — how much of the
+history was written by an AI rather than by hand. It is recomputed onto the
+release branch rather than onto `master`, so the figure arrives with the release
+it describes instead of churning on every push.

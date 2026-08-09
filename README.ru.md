@@ -1,6 +1,7 @@
 # claude-status
 
 [![CI](https://github.com/roxblnfk/claude-status/actions/workflows/ci.yml/badge.svg)](https://github.com/roxblnfk/claude-status/actions/workflows/ci.yml)
+![Vibe Index](https://img.shields.io/badge/Indexing%20Vibe-6168e5?style=flat-square)
 
 Слежение за расходом лимитов Claude Code: иконка в трее с двумя кольцевыми
 индикаторами — лимит сессии и норма на сегодня, — история в SQLite и подсказка,
@@ -313,3 +314,9 @@ echo '{"model":{"display_name":"Opus"},"rate_limits":{"five_hour":{"used_percent
 Версия хранится в `version.txt` и в `Cargo.toml` (строка с пометкой
 `x-release-please-version`) — оба обновляются этим pull request'ом, править их
 руками не нужно.
+
+Тем же pull request'ом обновляется бейдж [Vibe
+Index](https://github.com/roxblnfk/action-vibe-index) — доля истории,
+написанной ИИ, а не руками. Он пересчитывается в ветку релиза, а не в `master`,
+чтобы цифра приезжала вместе с релизом, который её описывает, а не менялась на
+каждый push.
