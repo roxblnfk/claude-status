@@ -14,7 +14,7 @@ mod ui;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use claude_status_core::{Config, timefmt, tr, tr_args};
+use claude_status_core::{Config, autostart, timefmt, tr, tr_args, update};
 use eframe::egui;
 
 use crate::state::AppState;
@@ -43,6 +43,9 @@ fn main() -> Result<()> {
 }
 
 fn run_gui(hidden: bool) -> Result<()> {
+    // The image an update displaced cannot be deleted while it is running; by
+    // now it is not.
+    update::clean_leftovers();
     tray::init_platform()?;
 
     let options = eframe::NativeOptions {
@@ -152,6 +155,17 @@ impl eframe::App for App {
             }
         }
 
+        // A process cannot swap out its own image, so stepping into a freshly
+        // installed version means handing over to a new one. It goes straight
+        // to the tray: the window this was pressed in is about to vanish.
+        if std::mem::take(&mut self.state.restart_requested) {
+            if let Ok(exe) = std::env::current_exe() {
+                let _ = std::process::Command::new(exe).arg(autostart::TRAY_FLAG).spawn();
+            }
+            self.quitting = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+
         let period = Duration::from_secs(self.state.config.tray.refresh_secs.max(1));
         if self.last_refresh.elapsed() >= period {
             self.refresh();
@@ -174,6 +188,7 @@ impl eframe::App for App {
         }
     }
 }
+
 
 /// Loads a system font covering Cyrillic and the typography the status line uses.
 ///
@@ -202,4 +217,92 @@ fn setup_fonts(ctx: &egui::Context) {
         fonts.families.entry(family).or_default().push("system".to_owned());
     }
     ctx.set_fonts(fonts);
+}
+#[cfg(test)]
+mod translations {
+    use claude_status_core::tr;
+    use std::path::{Path, PathBuf};
+
+    /// Every translation key written out in the sources must exist.
+    ///
+    /// `rust-i18n` echoes an unknown key back rather than failing, so a typo —
+    /// or a key that ends up nested under the wrong parent — renders as
+    /// `settings.tray.refresh` in the middle of the window and nothing
+    /// complains. This asks for each one and reports the misses together.
+    #[test]
+    fn every_key_used_in_the_sources_exists() {
+        // Locale-independent: a key that exists translates in either language,
+        // and one that does not echoes back in both.
+        let crates = Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("crates/");
+
+        let mut missing = Vec::new();
+        let mut checked = 0;
+        for file in rust_files(crates) {
+            let text = std::fs::read_to_string(&file).expect("a source file");
+            for key in keys(&text) {
+                checked += 1;
+                if tr(&key) == key {
+                    missing.push(format!("  {}: {key}", file.display()));
+                }
+            }
+        }
+
+        assert!(checked > 100, "the scan found almost nothing — has it stopped working?");
+        assert!(missing.is_empty(), "translation keys with nothing behind them:\n{}", missing.join("\n"));
+    }
+
+    fn rust_files(dir: &Path) -> Vec<PathBuf> {
+        let mut found = Vec::new();
+        let Ok(entries) = std::fs::read_dir(dir) else { return found };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                found.extend(rust_files(&path));
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                found.push(path);
+            }
+        }
+        found
+    }
+
+    /// Literal keys handed to `tr` / `tr_args`, across a line break or not.
+    ///
+    /// A call with a computed key — `tr(&format!(…))`, `tr(chosen)` — has no
+    /// literal to check and is passed over.
+    fn keys(text: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        for pattern in ["tr(", "tr_args("] {
+            let mut offset = 0;
+            while let Some(pos) = text[offset..].find(pattern) {
+                let at = offset + pos;
+                offset = at + pattern.len();
+
+                // `tr(` also sits inside `tr_args(` and inside any identifier
+                // ending in those letters.
+                let standalone = text[..at]
+                    .chars()
+                    .next_back()
+                    .is_none_or(|c| !c.is_alphanumeric() && c != '_');
+                if !standalone {
+                    continue;
+                }
+                if let Some(body) = text[offset..].trim_start().strip_prefix('"')
+                    && let Some(end) = body.find('"')
+                    && looks_like_a_key(&body[..end])
+                {
+                    found.push(body[..end].to_string());
+                }
+            }
+        }
+        found
+    }
+
+    /// Keeps the scan off anything that is plainly not a key — including the
+    /// `"tr("` written out in this very file.
+    fn looks_like_a_key(text: &str) -> bool {
+        text.contains('.')
+            && text
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '_')
+    }
 }

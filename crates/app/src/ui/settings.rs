@@ -7,11 +7,11 @@ use claude_status_core::{
     install::{self, InstallStatus},
     paths,
     render::{self, PLACEHOLDERS, RenderContext},
-    timefmt, tr, tr_args,
+    timefmt, tr, tr_args, update,
 };
 use eframe::egui;
 
-use crate::state::AppState;
+use crate::state::{AppState, UpdateStage};
 
 /// Widget state that survives between frames.
 pub struct SettingsState {
@@ -46,6 +46,8 @@ pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut SettingsStat
         tray_section(ui, state);
         ui.add_space(12.0);
         autostart_section(ui, state, &mut ui_state.message);
+        ui.add_space(12.0);
+        update_section(ui, state);
         ui.add_space(12.0);
         probe_section(ui, state);
         ui.add_space(12.0);
@@ -329,6 +331,80 @@ fn autostart_section(
                 tr_args("settings.autostart.elsewhere", &[("path", path)]),
             );
             ui.label(egui::RichText::new(tr("settings.autostart.elsewhere_fix")).weak().small());
+        }
+    });
+}
+
+/// Self-update.
+///
+/// One button that carries the whole flow: it offers to check, then to download
+/// what the check found, then to restart into it. Nothing reaches the network
+/// before it is pressed.
+fn update_section(ui: &mut egui::Ui, state: &mut AppState) {
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.strong(tr("settings.update.title"));
+        ui.add_space(4.0);
+        ui.label(tr("settings.update.explanation"));
+        ui.add_space(6.0);
+
+        ui.label(
+            egui::RichText::new(tr_args(
+                "settings.update.current",
+                &[("version", &update::Version::current().to_string())],
+            ))
+            .weak()
+            .small(),
+        );
+        ui.add_space(4.0);
+
+        let stage = state.update_stage();
+        let busy = matches!(stage, UpdateStage::Checking | UpdateStage::Downloading);
+        let label = match &stage {
+            UpdateStage::Checking => tr("settings.update.checking"),
+            UpdateStage::Downloading => tr("settings.update.downloading"),
+            UpdateStage::Available(found) => {
+                tr_args("settings.update.download", &[("version", &found.version.to_string())])
+            }
+            UpdateStage::Installed(_) => tr("settings.update.restart"),
+            _ => tr("settings.update.check"),
+        };
+
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!busy, egui::Button::new(label)).clicked() {
+                match stage {
+                    UpdateStage::Available(_) => state.download_update(),
+                    // Handled in the paint loop: restarting means really
+                    // quitting, and only that loop knows how — the close
+                    // button merely hides the window in the tray.
+                    UpdateStage::Installed(_) => state.restart_requested = true,
+                    _ => state.check_for_update(),
+                }
+            }
+            if busy {
+                ui.spinner();
+            }
+        });
+
+        let note = match state.update_stage() {
+            UpdateStage::UpToDate => Some(Ok(tr("update.up_to_date"))),
+            UpdateStage::Available(found) => Some(Ok(tr_args(
+                "update.available",
+                &[("version", &found.version.to_string())],
+            ))),
+            UpdateStage::Installed(version) => Some(Ok(tr_args(
+                "update.installed",
+                &[("version", &version.to_string())],
+            ))),
+            UpdateStage::Failed(text) => Some(Err(text)),
+            _ => None,
+        };
+        if let Some(note) = note {
+            ui.add_space(4.0);
+            match note {
+                Ok(text) => ui.colored_label(crate::ui::level_color(0.0), text),
+                Err(text) => ui.colored_label(crate::ui::level_color(100.0), text),
+            };
         }
     });
 }

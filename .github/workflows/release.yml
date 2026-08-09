@@ -102,6 +102,18 @@ jobs:
           fi
           echo "archive=dist/$archive" >> "$GITHUB_OUTPUT"
 
+          # The loose binary as well, for `claude-status update` to fetch: it
+          # needs no unpacking, which is what keeps an archive format out of
+          # the program. The target triple in the name is what it matches on.
+          cd ..
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            loose="claude-status-${{ matrix.target }}.exe"
+          else
+            loose="claude-status-${{ matrix.target }}"
+          fi
+          cp "dist/$name/claude-status"* "dist/$loose"
+          echo "loose=dist/$loose" >> "$GITHUB_OUTPUT"
+
       - name: Attach to the release
         shell: bash
         env:
@@ -110,4 +122,5 @@ jobs:
           gh release upload "${{ inputs.tag }}" \
             "${{ steps.package.outputs.archive }}" \
             "${{ steps.package.outputs.archive }}.sha256" \
+            "${{ steps.package.outputs.loose }}" \
             --clobber

@@ -198,6 +198,7 @@ cli:
         claude-status status                show the registration state and the latest sample
         claude-status preview [template]    print the status line
         claude-status probe                 ask Claude Code for the limits and store them
+        claude-status update                fetch a newer release from GitHub, if any
         claude-status hook                  read one status line payload from stdin
                                             (what Claude Code runs; not for hand use)
         claude-status --help                this help
@@ -225,6 +226,7 @@ cli:
         claude-status status                показать состояние прописки и последний снимок
         claude-status preview [шаблон]      напечатать статусную строку
         claude-status probe                 спросить лимиты у Claude Code и сохранить
+        claude-status update                скачать с GitHub новую версию, если она есть
         claude-status hook                  прочитать одну порцию данных со stdin
                                             (это запускает Claude Code, руками не нужно)
         claude-status --help                эта справка
@@ -316,6 +318,36 @@ cli:
     burn:
       en: "  Pace:    %{pct}%/day"
       ru: "  Темп:    %{pct}%/сутки"
+
+update:
+  up_to_date:
+    en: The latest version is already installed
+    ru: Установлена последняя версия
+  available:
+    en: "Version %{version} is available"
+    ru: "Доступна версия %{version}"
+  installed:
+    en: "Version %{version} installed — restart to use it"
+    ru: "Версия %{version} установлена — перезапустите приложение"
+  error:
+    unreachable:
+      en: could not reach GitHub
+      ru: не удалось связаться с GitHub
+    status:
+      en: "GitHub answered with %{code}"
+      ru: "GitHub ответил %{code}"
+    unreadable:
+      en: the answer from GitHub could not be read
+      ru: не удалось разобрать ответ GitHub
+    size:
+      en: "the download is %{got} bytes instead of %{expected} — it did not arrive whole"
+      ru: "загружено %{got} байт вместо %{expected} — файл пришёл не целиком"
+    not_a_binary:
+      en: what arrived is not a program
+      ru: пришло не приложение
+    replace:
+      en: "could not put the new version in place of %{path}"
+      ru: "не удалось заменить %{path} новой версией"
 
 probe:
   updated:
@@ -774,6 +806,39 @@ settings:
     icon_hint:
       en: The outer ring is the 5-hour session, the inner one is today's budget.
       ru: Внешнее кольцо — пятичасовая сессия, внутреннее — норма на сегодня.
+    refresh:
+      en: "Refresh every:"
+      ru: "Обновлять каждые:"
+  update:
+    title:
+      en: Version
+      ru: Версия
+    explanation:
+      en: >-
+        The program is downloaded by hand, so it does not learn about a new
+        release on its own. Checking asks GitHub; nothing goes over the network
+        until you press the button.
+      ru: >-
+        Приложение скачивается вручную и само о новой версии не узнаёт. Проверка
+        спрашивает GitHub; до нажатия кнопки в сеть ничего не уходит.
+    current:
+      en: "Installed: %{version}"
+      ru: "Установлена: %{version}"
+    check:
+      en: Check for update
+      ru: Проверить обновление
+    checking:
+      en: Checking…
+      ru: Проверяю…
+    download:
+      en: "Download %{version}"
+      ru: "Загрузить %{version}"
+    downloading:
+      en: Downloading…
+      ru: Загружаю…
+    restart:
+      en: Restart
+      ru: Перезапустить
   autostart:
     title:
       en: Autostart
@@ -838,9 +903,6 @@ settings:
     running:
       en: Asking…
       ru: Спрашиваю…
-    refresh:
-      en: "Refresh every:"
-      ru: "Обновлять каждые:"
   language:
     title:
       en: Language

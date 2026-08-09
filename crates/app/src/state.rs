@@ -9,6 +9,7 @@ use claude_status_core::{
     install::{self, InstallStatus},
     pace::Overview,
     probe,
+    update,
     stats_cache::StatsCache,
     timefmt, tr, tr_args,
 };
@@ -62,6 +63,25 @@ pub struct AppState {
     probe: Arc<Mutex<ProbeSlot>>,
     /// Outcome of the last probe, for the settings screen.
     pub probe_message: Option<Result<String, String>>,
+    /// Shared with the update thread, for the same reason.
+    update: Arc<Mutex<UpdateStage>>,
+    /// Set by the settings screen, acted on by the paint loop: only that loop
+    /// can tell the difference between quitting and hiding in the tray.
+    pub restart_requested: bool,
+}
+
+/// Where self-update has got to. The settings button reads its label from this.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum UpdateStage {
+    #[default]
+    Idle,
+    Checking,
+    UpToDate,
+    Available(update::Update),
+    Downloading,
+    /// Installed and waiting for a restart to take effect.
+    Installed(update::Version),
+    Failed(String),
 }
 
 /// The probe thread's side of the fence.
@@ -86,6 +106,8 @@ impl AppState {
             scoped_model: None,
             probe: Arc::new(Mutex::new(ProbeSlot::default())),
             probe_message: None,
+            update: Arc::new(Mutex::new(UpdateStage::Idle)),
+            restart_requested: false,
         };
         state.refresh();
         state
@@ -162,6 +184,57 @@ impl AppState {
     /// Whether a probe is running right now.
     pub fn probing(&self) -> bool {
         self.probe.lock().is_ok_and(|slot| slot.running)
+    }
+
+    /// What the update button should say.
+    pub fn update_stage(&self) -> UpdateStage {
+        self.update.lock().map(|stage| stage.clone()).unwrap_or_default()
+    }
+
+    /// Asks GitHub whether there is anything newer.
+    pub fn check_for_update(&mut self) {
+        self.spawn_update(UpdateStage::Checking, |_| match update::check() {
+            Ok(Some(found)) => UpdateStage::Available(found),
+            Ok(None) => UpdateStage::UpToDate,
+            Err(e) => UpdateStage::Failed(format!("{e:#}")),
+        });
+    }
+
+    /// Downloads the update found by the check and puts it in place.
+    pub fn download_update(&mut self) {
+        let UpdateStage::Available(found) = self.update_stage() else {
+            return;
+        };
+        self.spawn_update(UpdateStage::Downloading, move |_| match update::install(&found) {
+            Ok(_) => UpdateStage::Installed(found.version),
+            Err(e) => UpdateStage::Failed(format!("{e:#}")),
+        });
+    }
+
+    /// Runs `work` on a thread, holding `busy` in the meantime.
+    ///
+    /// Both steps talk to the network for seconds at a time; on the paint
+    /// thread that would be a frozen window.
+    fn spawn_update(
+        &mut self,
+        busy: UpdateStage,
+        work: impl FnOnce(()) -> UpdateStage + Send + 'static,
+    ) {
+        {
+            let Ok(mut stage) = self.update.lock() else { return };
+            if matches!(*stage, UpdateStage::Checking | UpdateStage::Downloading) {
+                return;
+            }
+            *stage = busy;
+        }
+
+        let shared = Arc::clone(&self.update);
+        std::thread::spawn(move || {
+            let outcome = work(());
+            if let Ok(mut stage) = shared.lock() {
+                *stage = outcome;
+            }
+        });
     }
 
     /// The outer ring of the icon: the session limit.
@@ -281,6 +354,8 @@ mod tests {
             scoped_model: None,
             probe: Arc::new(Mutex::new(ProbeSlot::default())),
             probe_message: None,
+            update: Arc::new(Mutex::new(UpdateStage::Idle)),
+            restart_requested: false,
         }
     }
 

@@ -1,10 +1,14 @@
-//! Ties the crate's rebuild to the translation files.
+//! Records the build target so self-update can pick the right release asset.
 //!
-//! `rust_i18n::i18n!` reads `locales/` at compile time and bakes the strings
-//! into the binary, but cargo has no idea that dependency exists: without this
-//! hint an edited translation is silently ignored until something else forces a
-//! rebuild, and the UI keeps showing the previous text — or the raw key.
+//! Cargo tells a build script which triple it is building for, but does not
+//! pass it on to the crate itself.
 
 fn main() {
-    println!("cargo:rerun-if-changed=../../locales");
+    println!("cargo:rerun-if-changed=build.rs");
+    // `rust_i18n::i18n!` reads the translations in a proc macro, which Cargo
+    // cannot see into: without this, editing a translation changes nothing
+    // until something else forces the crate to be built again.
+    println!("cargo:rerun-if-changed=../../locales/app.yml");
+    let target = std::env::var("TARGET").unwrap_or_default();
+    println!("cargo:rustc-env=CLAUDE_STATUS_TARGET={target}");
 }

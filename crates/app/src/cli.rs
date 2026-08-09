@@ -9,7 +9,7 @@ use claude_status_core::{
     install::{self, InstallStatus},
     paths, probe,
     render::{self, RenderContext},
-    timefmt, tr, tr_args,
+    timefmt, tr, tr_args, update,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +30,8 @@ pub enum Command {
     Probe,
     /// Read one status line payload from stdin. What Claude Code runs.
     Hook,
+    /// Fetch a newer release from GitHub and put it in place.
+    Update,
     Help,
 }
 
@@ -48,6 +50,7 @@ pub fn parse(args: impl Iterator<Item = String>) -> Result<Command> {
         "preview" => Ok(Command::Preview { template: args.get(1).cloned() }),
         "probe" => Ok(Command::Probe),
         install::HOOK_ARG => Ok(Command::Hook),
+        "update" => Ok(Command::Update),
         other => bail!(
             "{}\n\n{}",
             tr_args("cli.unknown_command", &[("command", other)]),
@@ -111,7 +114,35 @@ pub fn run(command: Command) -> Result<()> {
         Command::Status => status(),
         Command::Preview { template } => preview(template.as_deref()),
         Command::Probe => probe_once(),
+        Command::Update => update_now(),
     }
+}
+
+/// Checks for a newer release and installs it if there is one.
+fn update_now() -> Result<()> {
+    println!(
+        "{}",
+        tr_args(
+            "settings.update.current",
+            &[("version", &update::Version::current().to_string())]
+        )
+    );
+
+    let Some(found) = update::check()? else {
+        println!("{}", tr("update.up_to_date"));
+        return Ok(());
+    };
+    println!(
+        "{}",
+        tr_args("update.available", &[("version", &found.version.to_string())])
+    );
+
+    update::install(&found)?;
+    println!(
+        "{}",
+        tr_args("update.installed", &[("version", &found.version.to_string())])
+    );
+    Ok(())
 }
 
 fn status() -> Result<()> {

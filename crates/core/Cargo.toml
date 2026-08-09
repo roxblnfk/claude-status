@@ -18,6 +18,9 @@ sys-locale = "0.3.2"
 thiserror = "2.0.20"
 time = { version = "0.3.55", features = ["formatting", "local-offset", "macros", "parsing"] }
 toml = "1.1.4"
+# Talking to the GitHub releases API for self-update. Blocking and small: the
+# update runs on a thread of its own, so an async runtime would buy nothing.
+ureq = "3.4.0"
 
 # Autostart is a registry value under HKEY_CURRENT_USER; the other platforms
 # get by with a file.

@@ -21,6 +21,7 @@ pub mod render;
 pub mod stats_cache;
 pub mod statusline;
 pub mod timefmt;
+pub mod update;
 
 pub use config::Config;
 pub use db::{Db, Sample, Written};
@@ -75,6 +76,10 @@ mod tests {
         let _guard = i18n::test_guard(Language::En);
         // rust-i18n echoes the key back; an untranslated string must be obvious
         // in the UI instead of rendering as an empty label.
-        assert!(tr("no.such.key").contains("no.such.key"));
+        //
+        // Held in a variable rather than written out: the scan that checks
+        // every literal key exists would otherwise flag this deliberate one.
+        let absent = "no.such.key";
+        assert!(tr(absent).contains(absent));
     }
 }

@@ -145,6 +145,7 @@ claude-status uninstall
 claude-status status             registration state and latest sample
 claude-status preview [template] print the status line
 claude-status probe              ask Claude Code for the limits and store them
+claude-status update             fetch a newer release from GitHub, if any
 claude-status hook               read one payload from stdin (what Claude Code runs)
 ```
 
@@ -242,6 +243,24 @@ system every refresh. A copy of the answer would go stale the moment the entry
 is removed by anything else. If the registered path points at a different
 binary — what moving the executable leaves behind — the settings screen says so
 instead of quietly reporting the autostart as off.
+
+## Updating
+
+**Settings → Version** carries one button through the whole thing: it offers to
+check, then to download what the check found, then to restart into it. Nothing
+reaches the network until it is pressed — a usage monitor has no business
+phoning home unasked. `claude-status update` does the same from a shell.
+
+Every release publishes the loose executable beside the archives, and that is
+what gets fetched: no unpacking, so no archive format inside the program. The
+asset is chosen by the target triple in its name, recorded at build time.
+
+The download is checked against the size GitHub reports and against the magic
+number of a program before anything is touched — that is what catches a proxy
+answering with an error page. Then the running binary is renamed aside and the
+new one takes its place, so the path in `statusLine.command` keeps working; the
+displaced file is deleted on the next start. If the move fails the old binary
+goes back where it was.
 
 ## Localisation
 
