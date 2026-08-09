@@ -143,6 +143,19 @@ fn status() -> Result<()> {
                     tr_args("cli.status.allowance", &[("pct", &format!("{per_day:5.1}"))])
                 );
             }
+            if let Some(d) = overview.daily {
+                println!(
+                    "{}",
+                    tr_args(
+                        "cli.status.today",
+                        &[
+                            ("spent", &format!("{:.1}", d.spent_pct)),
+                            ("allowance", &format!("{:.1}", d.allowance_pct)),
+                            ("left", &format!("{:.1}", d.remaining_pct())),
+                        ]
+                    )
+                );
+            }
             if let Some(burn) = overview.week_burn {
                 let pct = format!("{:5.1}", burn.pct_per_day);
                 println!("{}", tr_args("cli.status.burn", &[("pct", &pct)]));

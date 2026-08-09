@@ -142,6 +142,12 @@ recomputed as it is spent would keep retreating and could never be reached. On
 the last day of the week the division is dropped — everything still left may go
 today.
 
+This makes today's ration and `{daily}` two different numbers, and deliberately
+so: `{daily}` is the same division redone at every reading, over the time left
+from *now*, so it climbs whenever a day comes in under budget. Today's ration
+was fixed at midnight and does not move. The one answers "what rate keeps me
+going to the reset", the other "how much was set aside for today".
+
 If collecting started later than the week did there is no reading from before
 midnight, and the level has to be estimated: the usage seen at the first reading
 is spread evenly back over the days since the week began. The **Today** row in

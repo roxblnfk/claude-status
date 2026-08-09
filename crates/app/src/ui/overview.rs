@@ -300,30 +300,40 @@ fn budget_card(ui: &mut egui::Ui, state: &AppState, w: &WindowState) {
 
 /// The plain-language conclusion drawn from the numbers of the budget card.
 ///
-/// `None` when the window is about to reset and a daily rate has stopped making
-/// sense.
+/// Everything but the warning speaks in terms of today's ration. Mixing it with
+/// the average-per-day figure produces a sentence that does not add up: the two
+/// are the same formula applied at different moments, over different spans.
 fn advice(state: &AppState, w: &WindowState) -> Option<(String, Option<egui::Color32>)> {
-    let per_day = format!("{:.1}", w.allowance_per_day_pct()?);
-    let today = format!("{:.1}", state.overview.daily?.remaining_pct());
-
+    // The one case where the rate for the rest of the week is the actionable
+    // number: it is the ceiling that has to be respected from here on.
     if let Some(burn) = state.overview.week_burn
         && let Some(at) = w.exhausted_at(burn.pct_per_day)
+        && let Some(per_day) = w.allowance_per_day_pct()
     {
         let text = tr_args(
             "overview.budget.advice.slow_down",
-            &[("time", &timefmt::datetime(at)), ("pct", &per_day)],
+            &[("time", &timefmt::datetime(at)), ("pct", &format!("{per_day:.1}"))],
         );
         return Some((text, Some(level_color(100.0))));
     }
 
-    if w.deviation_pct() > 10.0 {
-        let text = tr_args("overview.budget.advice.ahead", &[("pct", &per_day)]);
+    let daily = state.overview.daily?;
+    let args = [
+        ("allowance", format!("{:.1}", daily.allowance_pct)),
+        ("left", format!("{:.1}", daily.remaining_pct())),
+    ];
+    let args: Vec<(&str, &str)> = args.iter().map(|(k, v)| (*k, v.as_str())).collect();
+
+    if daily.used_fraction() >= 1.0 {
+        let text = tr_args("overview.budget.advice.today_done", &args);
         return Some((text, Some(level_color(80.0))));
     }
 
-    let text =
-        tr_args("overview.budget.advice.on_track", &[("pct", &per_day), ("today", &today)]);
-    Some((text, None))
+    if w.deviation_pct() > 10.0 {
+        return Some((tr_args("overview.budget.advice.ahead", &args), Some(level_color(80.0))));
+    }
+
+    Some((tr_args("overview.budget.advice.on_track", &args), None))
 }
 
 fn freshness(ui: &mut egui::Ui, state: &AppState, now: i64) {

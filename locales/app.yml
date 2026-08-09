@@ -289,8 +289,11 @@ cli:
       en: "  Week:    window reset %{reset}, nothing reported since"
       ru: "  Неделя:  окно сброшено %{reset}, данных после этого нет"
     allowance:
-      en: "  Budget:  %{pct}%/day"
-      ru: "  Норма:   %{pct}%/сутки"
+      en: "  Average: %{pct}%/day"
+      ru: "  Средне:  %{pct}%/сутки"
+    today:
+      en: "  Today:   %{spent}% of %{allowance}%, %{left}% left"
+      ru: "  Сегодня: %{spent}% из %{allowance}%, осталось %{left}%"
     burn:
       en: "  Pace:    %{pct}%/day"
       ru: "  Темп:    %{pct}%/сутки"
@@ -442,15 +445,19 @@ overview:
       en: Limit remaining
       ru: Осталось лимита
     per_day:
-      en: Daily budget
-      ru: Норма в сутки
+      en: Average per day
+      ru: В среднем в сутки
     per_day_hint:
       en: >-
-        The limit left, divided by the days left. Keep to it and the limit lasts
-        exactly until the reset.
+        The limit left right now, divided by the time left. Recomputed with
+        every reading, so it rises when a day comes in under budget. Today's
+        ration in the row below is the same division made at midnight and then
+        held for the day — the two are meant to differ.
       ru: >-
-        Остаток лимита, делённый на оставшиеся дни. Если держаться этой нормы,
-        лимита хватит ровно до сброса.
+        Остаток лимита на сейчас, делённый на оставшееся время. Пересчитывается
+        с каждым снимком, поэтому растёт, когда день прошёл экономно. Норма на
+        сегодня в строке ниже — то же деление, но сделанное в полночь и
+        зафиксированное на день; они и должны расходиться.
     per_day_value:
       en: "%{pct}% — to land exactly within the remaining %{left}"
       ru: "%{pct}% — чтобы ровно уложиться в оставшиеся %{left}"
@@ -507,20 +514,27 @@ overview:
         ru: >-
           Стоит сбавить: при текущей скорости лимит кончится %{time}. Чтобы его
           хватило до сброса, держитесь не более %{pct}% в сутки.
+      today_done:
+        en: >-
+          Today's ration of %{allowance}% is used up. The week still holds, but
+          it is worth stopping until midnight.
+        ru: >-
+          Норма на сегодня — %{allowance}% — израсходована. До сброса лимита
+          хватает, но лучше остановиться до полуночи.
       ahead:
         en: >-
-          You are ahead of the even pace, but the limit still holds. Keep to
-          about %{pct}% a day to stay comfortable.
+          You are ahead of the even pace, but the limit still holds. Today's
+          ration is %{allowance}%, with %{left}% of it still free.
         ru: >-
-          Вы опережаете равномерный график, но лимита пока хватает. Ориентир —
-          около %{pct}% в сутки.
+          Вы опережаете равномерный график, но лимита пока хватает. Норма на
+          сегодня — %{allowance}%, из неё свободно ещё %{left}%.
       on_track:
         en: >-
-          On track. There is room for %{pct}% a day until the reset, %{today}%
-          of it today.
+          On track. Today's ration is %{allowance}%, with %{left}% of it still
+          free.
         ru: >-
-          Всё в порядке. До сброса можно тратить по %{pct}% в сутки, из них
-          %{today}% — ещё сегодня.
+          Всё в порядке. Норма на сегодня — %{allowance}%, из неё свободно ещё
+          %{left}%.
     exhausted:
       en: Limit runs out
       ru: Лимит кончится
