@@ -40,6 +40,12 @@ error:
   own_exe:
     en: could not determine the path to our own binary
     ru: не удалось определить путь к своему бинарнику
+  autostart_read:
+    en: could not read the autostart entry
+    ru: не удалось прочитать запись автозапуска
+  autostart_write:
+    en: could not change the autostart entry
+    ru: не удалось изменить запись автозапуска
   exe_parent:
     en: the binary has no parent directory
     ru: у бинарника нет родительского каталога
@@ -191,6 +197,7 @@ cli:
 
       Usage:
         claude-status                       launch the window and tray icon
+        claude-status --tray                launch into the tray without a window
         claude-status install [--interval N] [--force]
                                             register the hook in ~/.claude/settings.json
         claude-status uninstall             remove the hook from the settings
@@ -215,6 +222,7 @@ cli:
 
       Использование:
         claude-status                       запустить окно и иконку в трее
+        claude-status --tray                запустить сразу в трей, без окна
         claude-status install [--interval N] [--force]
                                             прописать хук в ~/.claude/settings.json
         claude-status uninstall             убрать хук из настроек
@@ -755,6 +763,34 @@ settings:
     icon_hint:
       en: The outer ring is the 5-hour session, the inner one is today's budget.
       ru: Внешнее кольцо — пятичасовая сессия, внутреннее — норма на сегодня.
+  autostart:
+    title:
+      en: Autostart
+      ru: Автозапуск
+    enabled:
+      en: Start with the system
+      ru: Запускать вместе с системой
+    hint:
+      en: >-
+        Starts hidden in the tray. The hook keeps collecting samples on its own,
+        but the icon, today's budget and the direct request need the application
+        running.
+      ru: >-
+        Запускается сразу в трей, без окна. Хук собирает данные и сам по себе,
+        но иконка, норма на сегодня и прямой запрос работают только при
+        запущенном приложении.
+    elsewhere:
+      en: "The system is starting another copy: %{path}"
+      ru: "Система запускает другую копию: %{path}"
+    elsewhere_fix:
+      en: Tick the box to point it at this one.
+      ru: Поставьте галочку, чтобы указать на текущую.
+    on:
+      en: Autostart enabled
+      ru: Автозапуск включён
+    off:
+      en: Autostart disabled
+      ru: Автозапуск выключен
   probe:
     title:
       en: Asking Claude Code directly

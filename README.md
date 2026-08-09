@@ -130,6 +130,7 @@ The same from a shell, if you need automation:
 
 ```
 claude-status                    window and tray icon
+claude-status --tray             straight into the tray, no window
 claude-status install [--interval N] [--force]
 claude-status uninstall
 claude-status status             registration state and latest sample
@@ -211,6 +212,19 @@ Two concentric gauges, the outer one inscribed in the icon bounds:
 Both keep their track, so a ring stays a ring at any fill and the icon never
 turns into a solid disc. The colour follows the level: green, yellow past a
 half, orange past three quarters, red past 90 %.
+
+## Starting with the session
+
+**Settings → Autostart** registers the program with the operating system: a
+value under `HKCU\...\CurrentVersion\Run` on Windows, a `.desktop` file in
+`~/.config/autostart` on Linux, a launch agent in `~/Library/LaunchAgents` on
+macOS. The entry carries `--tray`, so a login brings up the icon and no window.
+
+The tick is not stored in `config.toml` — it is read back from the operating
+system every refresh. A copy of the answer would go stale the moment the entry
+is removed by anything else. If the registered path points at a different
+binary — what moving the executable leaves behind — the settings screen says so
+instead of quietly reporting the autostart as off.
 
 ## Localisation
 

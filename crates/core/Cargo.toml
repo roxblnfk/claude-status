@@ -18,3 +18,8 @@ sys-locale = "0.3.2"
 thiserror = "2.0.20"
 time = { version = "0.3.55", features = ["formatting", "local-offset", "macros", "parsing"] }
 toml = "1.1.4"
+
+# Autostart is a registry value under HKEY_CURRENT_USER; the other platforms
+# get by with a file.
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55.0"

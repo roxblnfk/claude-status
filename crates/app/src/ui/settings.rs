@@ -1,7 +1,7 @@
 //! The "Settings" tab: the status line template and registering the hook.
 
 use claude_status_core::{
-    Db, Language,
+    Db, Language, autostart,
     config::{MIN_PROBE_INTERVAL_SECS, PRESETS},
     i18n,
     install::{self, InstallStatus},
@@ -44,6 +44,8 @@ pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut SettingsStat
         language_section(ui, state);
         ui.add_space(12.0);
         tray_section(ui, state);
+        ui.add_space(12.0);
+        autostart_section(ui, state, &mut ui_state.message);
         ui.add_space(12.0);
         probe_section(ui, state);
         ui.add_space(12.0);
@@ -286,6 +288,43 @@ fn tray_section(ui: &mut egui::Ui, state: &mut AppState) {
                     .suffix(tr("unit.seconds_suffix")),
             );
         });
+    });
+}
+
+/// Starting with the session.
+///
+/// The tick is not a configuration value: it is read from and written to the
+/// operating system directly, so it stays honest if the entry is removed by
+/// anything else.
+fn autostart_section(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    message: &mut Option<Result<String, String>>,
+) {
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.strong(tr("settings.autostart.title"));
+        ui.add_space(4.0);
+
+        let mut on = state.autostart.is_on();
+        if ui.checkbox(&mut on, tr("settings.autostart.enabled")).changed() {
+            *message = Some(match autostart::set(on) {
+                Ok(()) => Ok(tr(if on { "settings.autostart.on" } else { "settings.autostart.off" })),
+                Err(e) => Err(format!("{e:#}")),
+            });
+            state.refresh();
+        }
+
+        ui.label(egui::RichText::new(tr("settings.autostart.hint")).weak().small());
+
+        if let autostart::State::Elsewhere { path } = &state.autostart {
+            ui.add_space(4.0);
+            ui.colored_label(
+                crate::ui::level_color(80.0),
+                tr_args("settings.autostart.elsewhere", &[("path", path)]),
+            );
+            ui.label(egui::RichText::new(tr("settings.autostart.elsewhere_fix")).weak().small());
+        }
     });
 }
 

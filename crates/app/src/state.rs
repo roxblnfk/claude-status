@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use claude_status_core::{
-    Config, Db, Sample,
+    Config, Db, Sample, autostart,
     install::{self, InstallStatus},
     pace::Overview,
     probe,
@@ -49,6 +49,9 @@ pub struct AppState {
     pub range: Range,
     pub stats: Option<StatsCache>,
     pub install: InstallStatus,
+    /// Whether the session starts us, read from the operating system rather
+    /// than mirrored in the configuration — a mirror would drift.
+    pub autostart: autostart::State,
     /// The last read error — shown in the window, never fatal.
     pub error: Option<String>,
     pub refreshed_at: i64,
@@ -77,6 +80,7 @@ impl AppState {
             range: Range::Week,
             stats: None,
             install: InstallStatus::Absent,
+            autostart: autostart::State::Off,
             error: None,
             refreshed_at: 0,
             scoped_model: None,
@@ -103,6 +107,7 @@ impl AppState {
         }
 
         self.install = install::status().unwrap_or(InstallStatus::Absent);
+        self.autostart = autostart::state().unwrap_or(autostart::State::Off);
         self.maybe_probe(now);
     }
 
@@ -270,6 +275,7 @@ mod tests {
             range: Range::Week,
             stats: None,
             install: InstallStatus::Absent,
+            autostart: autostart::State::Off,
             error: None,
             refreshed_at: 0,
             scoped_model: None,

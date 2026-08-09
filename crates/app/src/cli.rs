@@ -5,7 +5,7 @@
 
 use anyhow::{Result, bail};
 use claude_status_core::{
-    Config, Db,
+    Config, Db, autostart,
     install::{self, InstallStatus},
     paths, probe,
     render::{self, RenderContext},
@@ -14,8 +14,10 @@ use claude_status_core::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
-    /// Launch the window and the tray icon.
-    Gui,
+    /// Launch the window and the tray icon. `hidden` starts in the tray alone —
+    /// what autostart asks for, so that a login does not open a window over
+    /// whatever the user is doing.
+    Gui { hidden: bool },
     /// Register the hook in the Claude Code settings.
     Install { interval: Option<u64>, force: bool },
     /// Remove the hook from the settings.
@@ -32,11 +34,12 @@ pub enum Command {
 pub fn parse(args: impl Iterator<Item = String>) -> Result<Command> {
     let args: Vec<String> = args.collect();
     let Some(first) = args.first() else {
-        return Ok(Command::Gui);
+        return Ok(Command::Gui { hidden: false });
     };
 
     match first.as_str() {
         "-h" | "--help" | "help" => Ok(Command::Help),
+        autostart::TRAY_FLAG => Ok(Command::Gui { hidden: true }),
         "install" => parse_install(&args[1..]),
         "uninstall" => Ok(Command::Uninstall),
         "status" => Ok(Command::Status),
@@ -75,7 +78,7 @@ fn parse_install(args: &[String]) -> Result<Command> {
 
 pub fn run(command: Command) -> Result<()> {
     match command {
-        Command::Gui => unreachable!("the GUI is launched from main"),
+        Command::Gui { .. } => unreachable!("the GUI is launched from main"),
         Command::Help => {
             println!("{}", tr("cli.help"));
             Ok(())
@@ -239,7 +242,12 @@ mod tests {
 
     #[test]
     fn no_arguments_launches_gui() {
-        assert_eq!(parse_args(&[]).unwrap(), Command::Gui);
+        assert_eq!(parse_args(&[]).unwrap(), Command::Gui { hidden: false });
+    }
+
+    #[test]
+    fn the_tray_flag_starts_without_a_window() {
+        assert_eq!(parse_args(&["--tray"]).unwrap(), Command::Gui { hidden: true });
     }
 
     #[test]

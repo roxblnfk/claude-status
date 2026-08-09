@@ -28,23 +28,25 @@ fn main() -> Result<()> {
     Config::load_and_apply_language();
 
     match cli::parse(std::env::args().skip(1))? {
-        cli::Command::Gui => run_gui(),
+        cli::Command::Gui { hidden } => run_gui(hidden),
         command => cli::run(command),
     }
 }
 
-fn run_gui() -> Result<()> {
+fn run_gui(hidden: bool) -> Result<()> {
     tray::init_platform()?;
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(tr("ui.window_title"))
             .with_inner_size([720.0, 560.0])
-            .with_min_inner_size([460.0, 320.0]),
+            .with_min_inner_size([460.0, 320.0])
+            // Started by the session: the icon appears, the window does not.
+            .with_visible(!hidden),
         ..Default::default()
     };
 
-    eframe::run_native("claude-status", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
+    eframe::run_native("claude-status", options, Box::new(move |cc| Ok(Box::new(App::new(cc, hidden)))))
         .map_err(|e| anyhow::anyhow!(tr_args("error.run_gui", &[("error", &e.to_string())])))
 }
 
@@ -57,10 +59,13 @@ struct App {
     last_refresh: Instant,
     /// Closing the window hides it in the tray; a real exit takes a command.
     quitting: bool,
+    /// Spent on the first frame: `with_visible(false)` alone is not enough,
+    /// eframe shows the window once it has something to draw.
+    hide_on_start: bool,
 }
 
 impl App {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>, hidden: bool) -> Self {
         setup_fonts(&cc.egui_ctx);
         Self {
             state: AppState::load(),
@@ -68,6 +73,7 @@ impl App {
             tray: None,
             last_refresh: Instant::now(),
             quitting: false,
+            hide_on_start: hidden,
         }
     }
 
@@ -119,6 +125,11 @@ impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         tray::pump_platform_events();
         self.ensure_tray(ctx);
+
+        if self.hide_on_start {
+            self.hide_on_start = false;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
 
         let actions = self.tray.as_ref().map(Tray::poll).unwrap_or_default();
         for action in actions {
