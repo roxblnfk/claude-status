@@ -175,7 +175,7 @@ Opus, например, документацией до сих пор не оп�
 Windows и macOS работают из коробки. На Linux трею нужны системные библиотеки:
 
 ```bash
-sudo apt install libgtk-3-dev libayatana-appindicator3-dev
+sudo apt install libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
 ```
 
 Иконка там живёт поверх libayatana-appindicator и требует главного цикла GTK,

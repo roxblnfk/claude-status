@@ -182,7 +182,7 @@ separate bar. The code reads it if it arrives.
 Windows and macOS work out of the box. On Linux the tray needs system libraries:
 
 ```bash
-sudo apt install libgtk-3-dev libayatana-appindicator3-dev
+sudo apt install libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
 ```
 
 There the icon sits on top of libayatana-appindicator and needs a GTK main loop,
