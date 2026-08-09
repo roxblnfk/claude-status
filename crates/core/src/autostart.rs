@@ -16,7 +16,8 @@ use anyhow::{Context, Result};
 /// instead of opening a window over whatever the user is doing at login.
 pub const TRAY_FLAG: &str = "--tray";
 
-/// Name the entry is filed under, on every platform that needs one.
+/// Name the entry is filed under. macOS files it under [`LABEL`] instead.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 const ENTRY: &str = "claude-status";
 
 /// Whether the application is registered to start with the session.
