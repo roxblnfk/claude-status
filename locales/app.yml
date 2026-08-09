@@ -196,6 +196,7 @@ cli:
         claude-status uninstall             remove the hook from the settings
         claude-status status                show the registration state and the latest sample
         claude-status preview [template]    print the status line
+        claude-status probe                 ask Claude Code for the limits and store them
         claude-status --help                this help
 
       install options:
@@ -208,6 +209,7 @@ cli:
         CLAUDE_STATUS_DUMP   file the hook appends raw Claude Code JSON to
         CLAUDE_STATUS_LANG   interface language: en, ru or auto
         CLAUDE_STATUS_DEBUG  print hook errors to stderr
+        CLAUDE_STATUS_CLAUDE_BIN  Claude Code executable used by the probe
     ru: |-
       claude-status — наблюдение за лимитами Claude Code
 
@@ -218,6 +220,7 @@ cli:
         claude-status uninstall             убрать хук из настроек
         claude-status status                показать состояние прописки и последний снимок
         claude-status preview [шаблон]      напечатать статусную строку
+        claude-status probe                 спросить лимиты у Claude Code и сохранить
         claude-status --help                эта справка
 
       Ключи install:
@@ -230,6 +233,7 @@ cli:
         CLAUDE_STATUS_DUMP   файл, куда хук дописывает сырой JSON от Claude Code
         CLAUDE_STATUS_LANG   язык интерфейса: en, ru или auto
         CLAUDE_STATUS_DEBUG  печатать ошибки хука в stderr
+        CLAUDE_STATUS_CLAUDE_BIN  исполняемый файл Claude Code для запроса
   unknown_command:
     en: "unknown command: %{command}"
     ru: "неизвестная команда: %{command}"
@@ -288,6 +292,12 @@ cli:
     week_expired:
       en: "  Week:    window reset %{reset}, nothing reported since"
       ru: "  Неделя:  окно сброшено %{reset}, данных после этого нет"
+    scoped:
+      en: "  %{model}: %{pct}%  resets %{reset}"
+      ru: "  %{model}: %{pct}%  сброс %{reset}"
+    scoped_unknown:
+      en: Per model
+      ru: По модели
     allowance:
       en: "  Average: %{pct}%/day"
       ru: "  Средне:  %{pct}%/сутки"
@@ -297,6 +307,31 @@ cli:
     burn:
       en: "  Pace:    %{pct}%/day"
       ru: "  Темп:    %{pct}%/сутки"
+
+probe:
+  updated:
+    en: Data refreshed from Claude Code
+    ru: Данные обновлены из Claude Code
+  error:
+    spawn:
+      en: could not start Claude Code — check that the `claude` command is available
+      ru: не удалось запустить Claude Code — проверьте, доступна ли команда `claude`
+    timeout:
+      en: Claude Code did not answer in time
+      ru: Claude Code не ответил вовремя
+    unreadable:
+      en: the answer from Claude Code could not be read
+      ru: не удалось разобрать ответ Claude Code
+    refused:
+      en: Claude Code declined to report the usage
+      ru: Claude Code отказался сообщить расход
+    no_limits:
+      en: >-
+        no limits in the answer — this happens on an API key or a third-party
+        provider, where a subscription plan does not apply
+      ru: >-
+        в ответе нет лимитов — так бывает при работе по API-ключу или через
+        стороннего провайдера, где лимиты подписки не действуют
 
 tray:
   menu:
@@ -403,8 +438,11 @@ overview:
       en: Week
       ru: Неделя
     week_opus:
-      en: Week — Opus
-      ru: Неделя — Opus
+      en: Week — per model
+      ru: Неделя — по модели
+    week_scoped:
+      en: "Week — %{model}"
+      ru: "Неделя — %{model}"
   expired:
     en: window has already reset
     ru: окно уже сброшено
@@ -717,6 +755,42 @@ settings:
     icon_hint:
       en: The outer ring is the 5-hour session, the inner one is today's budget.
       ru: Внешнее кольцо — пятичасовая сессия, внутреннее — норма на сегодня.
+  probe:
+    title:
+      en: Asking Claude Code directly
+      ru: Прямой запрос к Claude Code
+    explanation:
+      en: >-
+        The status line only reaches sessions started from a terminal. When it
+        goes quiet — an editor-hosted session, or a long pause — Claude Code can
+        be asked for the same figures directly. It also reports the weekly cap
+        of a single model, which the status line never carries.
+      ru: >-
+        Статусная строка доходит только до сессий, запущенных из терминала.
+        Когда она замолкает — сессия внутри редактора или долгая пауза — те же
+        цифры можно спросить у Claude Code напрямую. Оттуда же приходит
+        недельный лимит по отдельной модели, которого в статусной строке нет.
+    enabled:
+      en: Ask when the status line has nothing fresh
+      ru: Спрашивать, когда в статусной строке нет свежего
+    interval:
+      en: "No more often than:"
+      ru: "Не чаще чем раз в:"
+    interval_hint:
+      en: >-
+        A request starts a Claude Code of its own for a few seconds and a few
+        hundred megabytes. It spends no tokens, but it is not free — while the
+        status line keeps delivering, nothing is asked at all.
+      ru: >-
+        Запрос поднимает отдельный Claude Code на несколько секунд и несколько
+        сотен мегабайт. Токены он не тратит, но и бесплатным не является — пока
+        статусная строка присылает данные, запрос не делается вовсе.
+    run_now:
+      en: Ask now
+      ru: Спросить сейчас
+    running:
+      en: Asking…
+      ru: Спрашиваю…
     refresh:
       en: "Refresh every:"
       ru: "Обновлять каждые:"

@@ -29,6 +29,12 @@ command configured as `statusLine.command`. The format is
 }
 ```
 
+That command is only run by a Claude Code started from a terminal. A session
+hosted by an editor over the agent SDK — Zed's agent panel, for instance — draws
+no status line, so the hook never fires there. For those, and for long pauses,
+Claude Code can be asked directly: see [Asking Claude Code
+directly](#asking-claude-code-directly).
+
 Hence the two-binary architecture:
 
 | Binary               | Role                                                                                     |
@@ -47,7 +53,47 @@ Consequences worth remembering:
   since reset. Such a figure is not shown as current — the gauge stays empty
   and the reading is quoted separately as the last known one.
 - `rate_limits` carry no per-model split — that comes from
-  `~/.claude/stats-cache.json`, which Claude Code computes itself.
+  `~/.claude/stats-cache.json`, which Claude Code computes itself, and the
+  weekly cap of a single model only from the direct request below.
+
+## Asking Claude Code directly
+
+Claude Code answers a control request for the data behind its `/usage` screen.
+The agent SDK exposes it as
+`usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET()`; on the wire it is
+one line on stdin:
+
+```bash
+echo '{"type":"control_request","request_id":"r","request":{"subtype":"get_usage"}}' \
+  | claude --print --input-format stream-json --output-format stream-json
+```
+
+The answer holds the five-hour and weekly windows, the weekly cap scoped to one
+model — which the status line never carries — and the extra-usage credits. It is
+account-wide, so any instance can be asked; it does not have to be the session
+that spent anything.
+
+The cost, measured: **3.3–4.2 s** and about **390 MB** for the duration of the
+call, roughly 1.2 s of CPU. No tokens are spent — the answer reports
+`total_cost_usd: 0` and no API time — but Claude Code does make one request of
+its own to fetch the figures, and any `SessionStart` hooks run each time.
+
+So the cheap source wins whenever it can. A request is made only when all of
+these hold:
+
+- it is enabled (`[probe] enabled`, on by default);
+- `interval_secs` has passed since the last one (15 minutes by default, never
+  less than 5 — the same throttle Claude Code applies to its own usage cache);
+- and the collected readings have stopped being useful: nothing collected at
+  all, nothing newer than `fresh_secs`, or the newest reading describes a window
+  that has already reset.
+
+While the status line keeps arriving, no request is made at all. `claude-status
+probe` forces one, and the **Settings** tab has a button. `CLAUDE_STATUS_CLAUDE_BIN`
+points at the executable if it is not where the native installer puts it.
+
+The API is marked unstable in the SDK and may change without notice; a failed
+request is reported and otherwise ignored.
 
 ## Building and installing
 

@@ -7,7 +7,7 @@ use anyhow::{Result, bail};
 use claude_status_core::{
     Config, Db,
     install::{self, InstallStatus},
-    paths,
+    paths, probe,
     render::{self, RenderContext},
     timefmt, tr, tr_args,
 };
@@ -24,6 +24,8 @@ pub enum Command {
     Status,
     /// Print the status line from the current data.
     Preview { template: Option<String> },
+    /// Ask Claude Code for the current limits and store the answer.
+    Probe,
     Help,
 }
 
@@ -39,6 +41,7 @@ pub fn parse(args: impl Iterator<Item = String>) -> Result<Command> {
         "uninstall" => Ok(Command::Uninstall),
         "status" => Ok(Command::Status),
         "preview" => Ok(Command::Preview { template: args.get(1).cloned() }),
+        "probe" => Ok(Command::Probe),
         other => bail!(
             "{}\n\n{}",
             tr_args("cli.unknown_command", &[("command", other)]),
@@ -101,6 +104,7 @@ pub fn run(command: Command) -> Result<()> {
         }
         Command::Status => status(),
         Command::Preview { template } => preview(template.as_deref()),
+        Command::Probe => probe_once(),
     }
 }
 
@@ -134,6 +138,20 @@ fn status() -> Result<()> {
     }
     if let Some(w) = overview.week {
         println!("{}", window_line("cli.status.week", &w));
+        if let Some(scoped) = overview.week_opus {
+            let model = db.scoped_model()?.unwrap_or_else(|| tr("cli.status.scoped_unknown"));
+            println!(
+                "{}",
+                tr_args(
+                    "cli.status.scoped",
+                    &[
+                        ("model", &model),
+                        ("pct", &format!("{:5.1}", scoped.used_pct)),
+                        ("reset", &timefmt::datetime(scoped.resets_at)),
+                    ]
+                )
+            );
+        }
         // Past the reset the remainder belongs to a week that is over; there is
         // nothing left to divide between days.
         if !w.is_expired() {
@@ -180,6 +198,18 @@ fn window_line(key: &str, w: &claude_status_core::WindowState) -> String {
             ("left", &timefmt::duration(w.remaining_secs())),
         ],
     )
+}
+
+/// Asks Claude Code for the limits and stores what comes back.
+fn probe_once() -> Result<()> {
+    let usage = probe::run(std::time::Duration::from_secs(30))?;
+    let db = Db::open_default()?;
+    let now = timefmt::now();
+    db.record_probe(&usage, now)?;
+    db.set_last_probe_ts(now)?;
+
+    println!("{}", tr("probe.updated"));
+    status()
 }
 
 fn preview(template: Option<&str>) -> Result<()> {

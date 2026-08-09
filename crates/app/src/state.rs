@@ -1,10 +1,14 @@
 //! GUI state: what has been read from the database and how to label it in the tray.
 
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
 use anyhow::Result;
 use claude_status_core::{
     Config, Db, Sample,
     install::{self, InstallStatus},
     pace::Overview,
+    probe,
     stats_cache::StatsCache,
     timefmt, tr, tr_args,
 };
@@ -48,6 +52,20 @@ pub struct AppState {
     /// The last read error — shown in the window, never fatal.
     pub error: Option<String>,
     pub refreshed_at: i64,
+    /// Which model the weekly scoped cap applies to, when it has been reported.
+    pub scoped_model: Option<String>,
+    /// Shared with the probe thread: a probe takes seconds, and the window has
+    /// to keep drawing meanwhile.
+    probe: Arc<Mutex<ProbeSlot>>,
+    /// Outcome of the last probe, for the settings screen.
+    pub probe_message: Option<Result<String, String>>,
+}
+
+/// The probe thread's side of the fence.
+#[derive(Default)]
+struct ProbeSlot {
+    running: bool,
+    outcome: Option<Result<String, String>>,
 }
 
 impl AppState {
@@ -61,6 +79,9 @@ impl AppState {
             install: InstallStatus::Absent,
             error: None,
             refreshed_at: 0,
+            scoped_model: None,
+            probe: Arc::new(Mutex::new(ProbeSlot::default())),
+            probe_message: None,
         };
         state.refresh();
         state
@@ -75,12 +96,14 @@ impl AppState {
         let now = timefmt::now();
         self.refreshed_at = now;
 
+        self.collect_probe();
         match self.reload(now) {
             Ok(()) => self.error = None,
             Err(e) => self.error = Some(format!("{e:#}")),
         }
 
         self.install = install::status().unwrap_or(InstallStatus::Absent);
+        self.maybe_probe(now);
     }
 
     fn reload(&mut self, now: i64) -> Result<()> {
@@ -92,7 +115,48 @@ impl AppState {
         // which a fixed time span is guaranteed to contain.
         self.overview = db.overview(now)?;
         self.stats = StatsCache::load().unwrap_or(None);
+        self.scoped_model = db.scoped_model().unwrap_or(None);
         Ok(())
+    }
+
+    /// Picks up what the probe thread left behind.
+    fn collect_probe(&mut self) {
+        let Ok(mut slot) = self.probe.lock() else { return };
+        if let Some(outcome) = slot.outcome.take() {
+            self.probe_message = Some(outcome);
+        }
+    }
+
+    /// Starts a probe if the cheap source has stopped saying anything useful.
+    fn maybe_probe(&mut self, now: i64) {
+        let last = Db::open_default().and_then(|db| db.last_probe_ts()).unwrap_or(0);
+        if probe::due(&self.config.probe, &self.overview, last, now) {
+            self.start_probe();
+        }
+    }
+
+    /// Runs a probe regardless of the interval — the button in the settings.
+    pub fn start_probe(&mut self) {
+        let Ok(mut slot) = self.probe.lock() else { return };
+        if slot.running {
+            return;
+        }
+        slot.running = true;
+        drop(slot);
+
+        let shared = Arc::clone(&self.probe);
+        std::thread::spawn(move || {
+            let outcome = probe_once();
+            if let Ok(mut slot) = shared.lock() {
+                slot.running = false;
+                slot.outcome = Some(outcome);
+            }
+        });
+    }
+
+    /// Whether a probe is running right now.
+    pub fn probing(&self) -> bool {
+        self.probe.lock().is_ok_and(|slot| slot.running)
     }
 
     /// The outer ring of the icon: the session limit.
@@ -153,6 +217,24 @@ impl AppState {
     }
 }
 
+/// One probe, start to stored.
+///
+/// Claude Code needs a few seconds to come up; beyond half a minute something
+/// is wrong and waiting longer helps nobody.
+fn probe_once() -> Result<String, String> {
+    let fail = |e: anyhow::Error| format!("{e:#}");
+
+    let usage = probe::run(Duration::from_secs(30)).map_err(fail)?;
+    let db = Db::open_default().map_err(fail)?;
+    let now = timefmt::now();
+    db.record_probe(&usage, now).map_err(fail)?;
+    // Stamped whatever the reading turned out to be: a probe that found
+    // nothing new still cost the same seconds and must not repeat at once.
+    db.set_last_probe_ts(now).map_err(fail)?;
+
+    Ok(tr("probe.updated"))
+}
+
 /// Truncates at a character boundary rather than a byte one.
 fn truncate_chars(s: &str, max: usize) -> String {
     match s.char_indices().nth(max) {
@@ -190,6 +272,9 @@ mod tests {
             install: InstallStatus::Absent,
             error: None,
             refreshed_at: 0,
+            scoped_model: None,
+            probe: Arc::new(Mutex::new(ProbeSlot::default())),
+            probe_message: None,
         }
     }
 

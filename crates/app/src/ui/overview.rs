@@ -24,7 +24,13 @@ pub fn draw(ui: &mut egui::Ui, state: &AppState) -> Option<Tab> {
             ui.add_space(8.0);
         }
         if let Some(w) = state.overview.week_opus {
-            window_card(ui, &tr("overview.card.week_opus"), &w, false);
+            // The status line never says which model the cap belongs to; the
+            // probe does, so the title carries the name once it is known.
+            let title = match &state.scoped_model {
+                Some(model) => tr_args("overview.card.week_scoped", &[("model", model)]),
+                None => tr("overview.card.week_opus"),
+            };
+            window_card(ui, &title, &w, false);
             ui.add_space(8.0);
         }
 

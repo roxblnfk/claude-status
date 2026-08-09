@@ -44,6 +44,7 @@ pub struct Config {
     pub storage: StorageConfig,
     pub tray: TrayConfig,
     pub ui: UiConfig,
+    pub probe: ProbeConfig,
     pub debug: DebugConfig,
 }
 
@@ -92,6 +93,25 @@ pub struct UiConfig {
     pub language: Language,
 }
 
+/// Asking Claude Code directly when the status line has nothing to offer.
+///
+/// Each run starts a short-lived Claude Code — seconds and hundreds of
+/// megabytes — so the defaults are deliberately lazy: never more often than
+/// `interval_secs`, and only when the collected readings have gone stale.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ProbeConfig {
+    pub enabled: bool,
+    /// Floor between two runs.
+    pub interval_secs: u64,
+    /// Readings younger than this are trusted and no run is made.
+    pub fresh_secs: u64,
+}
+
+/// Below this the probe would cost more than the answer is worth; Claude Code
+/// throttles its own usage cache by the same five minutes.
+pub const MIN_PROBE_INTERVAL_SECS: u64 = 300;
+
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct DebugConfig {
@@ -134,6 +154,19 @@ impl Default for StorageConfig {
 impl Default for TrayConfig {
     fn default() -> Self {
         Self { refresh_secs: 20 }
+    }
+}
+
+impl Default for ProbeConfig {
+    fn default() -> Self {
+        Self { enabled: true, interval_secs: 900, fresh_secs: 300 }
+    }
+}
+
+impl ProbeConfig {
+    /// The interval actually used, whatever the file says.
+    pub fn interval_secs(&self) -> u64 {
+        self.interval_secs.max(MIN_PROBE_INTERVAL_SECS)
     }
 }
 

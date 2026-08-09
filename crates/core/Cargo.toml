@@ -16,5 +16,5 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
 sys-locale = "0.3.2"
 thiserror = "2.0.20"
-time = { version = "0.3.55", features = ["formatting", "local-offset", "macros"] }
+time = { version = "0.3.55", features = ["formatting", "local-offset", "macros", "parsing"] }
 toml = "1.1.4"

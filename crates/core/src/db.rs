@@ -34,6 +34,9 @@ pub struct Sample {
     pub ctx_output: Option<i64>,
     pub ctx_size: Option<i64>,
     pub version: Option<String>,
+    /// Which model the weekly cap in `opus_*` applies to, when it is known.
+    /// The status line never says; the probe does.
+    pub scoped_model: Option<String>,
 }
 
 impl Sample {
@@ -124,7 +127,19 @@ impl Db {
             );
             "#,
         )?;
+
+        // Added once the probe started reporting which model the weekly cap is
+        // scoped to; `IF NOT EXISTS` has no counterpart for columns.
+        if !self.has_column("samples", "scoped_model")? {
+            self.conn.execute_batch("ALTER TABLE samples ADD COLUMN scoped_model TEXT;")?;
+        }
         Ok(())
+    }
+
+    fn has_column(&self, table: &str, column: &str) -> Result<bool> {
+        let mut stmt = self.conn.prepare(&format!("PRAGMA table_info({table})"))?;
+        let mut names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        Ok(names.any(|name| name.is_ok_and(|n| n == column)))
     }
 
     /// Stores a sample taken from the statusline JSON.
@@ -190,6 +205,77 @@ impl Db {
             ],
         )?;
         Ok(Written::Inserted)
+    }
+
+    /// Stores what a probe brought back.
+    ///
+    /// Filed under a session id of its own so that deduplication compares one
+    /// probe with the previous probe rather than with whatever a Claude Code
+    /// session happened to write in between.
+    pub fn record_probe(&self, usage: &crate::probe::Usage, now: i64) -> Result<Written> {
+        if usage.is_empty() {
+            return Ok(Written::Skipped);
+        }
+
+        let five_pct = usage.five_hour.map(|w| w.used_pct);
+        let five_resets_at = usage.five_hour.map(|w| w.resets_at);
+        let week_pct = usage.seven_day.map(|w| w.used_pct);
+        let week_resets_at = usage.seven_day.map(|w| w.resets_at);
+        let scoped_model = usage.scoped.as_ref().map(|(model, _)| model.clone());
+        let opus_pct = usage.scoped.as_ref().map(|(_, w)| w.used_pct);
+        let opus_resets_at = usage.scoped.as_ref().map(|(_, w)| w.resets_at);
+
+        if let Some(last) = self.latest_for_session(Some(crate::probe::SOURCE))?
+            && same_state(&last, five_pct, five_resets_at, week_pct, week_resets_at, opus_pct)
+        {
+            self.conn.execute(
+                "UPDATE samples SET last_seen_ts = ?1 WHERE id = ?2",
+                params![now.max(last.last_seen_ts), last.id],
+            )?;
+            return Ok(Written::Touched);
+        }
+
+        self.conn.execute(
+            r#"INSERT INTO samples (
+                   ts, last_seen_ts, five_pct, five_resets_at, week_pct, week_resets_at,
+                   opus_pct, opus_resets_at, session_id, scoped_model
+               ) VALUES (?1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
+            params![
+                now,
+                five_pct,
+                five_resets_at,
+                week_pct,
+                week_resets_at,
+                opus_pct,
+                opus_resets_at,
+                crate::probe::SOURCE,
+                scoped_model,
+            ],
+        )?;
+        Ok(Written::Inserted)
+    }
+
+    /// When the last probe ran, unix seconds.
+    pub fn last_probe_ts(&self) -> Result<i64> {
+        Ok(self.meta_get("last_probe_ts")?.and_then(|v| v.parse().ok()).unwrap_or(0))
+    }
+
+    pub fn set_last_probe_ts(&self, now: i64) -> Result<()> {
+        self.meta_set("last_probe_ts", &now.to_string())
+    }
+
+    /// The model the weekly scoped cap applies to, as last reported.
+    pub fn scoped_model(&self) -> Result<Option<String>> {
+        let name = self
+            .conn
+            .query_row(
+                "SELECT scoped_model FROM samples
+                 WHERE scoped_model IS NOT NULL ORDER BY id DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(name)
     }
 
     /// The most recently stored sample.
@@ -485,7 +571,7 @@ impl Db {
 
 const COLUMNS: &str = "id, ts, last_seen_ts, five_pct, five_resets_at, week_pct, week_resets_at, \
                        opus_pct, opus_resets_at, session_id, model_id, cost_usd, \
-                       ctx_input, ctx_output, ctx_size, version";
+                       ctx_input, ctx_output, ctx_size, version, scoped_model";
 
 fn row_to_sample(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sample> {
     Ok(Sample {
@@ -505,6 +591,7 @@ fn row_to_sample(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sample> {
         ctx_output: row.get(13)?,
         ctx_size: row.get(14)?,
         version: row.get(15)?,
+        scoped_model: row.get(16)?,
     })
 }
 

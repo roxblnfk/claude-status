@@ -2,7 +2,7 @@
 
 use claude_status_core::{
     Db, Language,
-    config::PRESETS,
+    config::{MIN_PROBE_INTERVAL_SECS, PRESETS},
     i18n,
     install::{self, InstallStatus},
     paths,
@@ -44,6 +44,8 @@ pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut SettingsStat
         language_section(ui, state);
         ui.add_space(12.0);
         tray_section(ui, state);
+        ui.add_space(12.0);
+        probe_section(ui, state);
         ui.add_space(12.0);
         storage_section(ui, state, &mut ui_state.confirming_reset, &mut ui_state.message);
         ui.add_space(12.0);
@@ -284,6 +286,58 @@ fn tray_section(ui: &mut egui::Ui, state: &mut AppState) {
                     .suffix(tr("unit.seconds_suffix")),
             );
         });
+    });
+}
+
+/// Asking Claude Code directly — the source that also works where no status
+/// line is drawn.
+fn probe_section(ui: &mut egui::Ui, state: &mut AppState) {
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.strong(tr("settings.probe.title"));
+        ui.add_space(4.0);
+        ui.label(tr("settings.probe.explanation"));
+        ui.add_space(6.0);
+
+        ui.checkbox(&mut state.config.probe.enabled, tr("settings.probe.enabled"));
+
+        ui.add_enabled_ui(state.config.probe.enabled, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(tr("settings.probe.interval"));
+                ui.add(
+                    egui::DragValue::new(&mut state.config.probe.interval_secs)
+                        .range(MIN_PROBE_INTERVAL_SECS..=21_600)
+                        .speed(30)
+                        .custom_formatter(|v, _| timefmt::duration(v as i64))
+                        .suffix(""),
+                );
+            });
+            ui.label(egui::RichText::new(tr("settings.probe.interval_hint")).weak().small());
+        });
+
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            let busy = state.probing();
+            let label = if busy {
+                tr("settings.probe.running")
+            } else {
+                tr("settings.probe.run_now")
+            };
+            if ui.add_enabled(!busy, egui::Button::new(label)).clicked() {
+                state.start_probe();
+            }
+            if busy {
+                ui.spinner();
+            }
+        });
+
+        if let Some(message) = &state.probe_message {
+            ui.add_space(4.0);
+            match message {
+                Ok(text) => ui.colored_label(crate::ui::level_color(0.0), text),
+                Err(text) => ui.colored_label(crate::ui::level_color(100.0), text),
+            };
+        }
     });
 }
 

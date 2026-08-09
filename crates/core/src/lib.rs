@@ -15,6 +15,7 @@ pub mod i18n;
 pub mod install;
 pub mod pace;
 pub mod paths;
+pub mod probe;
 pub mod render;
 pub mod stats_cache;
 pub mod statusline;
