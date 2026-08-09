@@ -3,7 +3,12 @@
 
 use std::collections::BTreeMap;
 
-use claude_status_core::{Sample, stats_cache::StatsCache, timefmt, tr, tr_args};
+use claude_status_core::{
+    Sample,
+    stats_cache::StatsCache,
+    statusline::{FIVE_HOUR_SECS, SEVEN_DAY_SECS},
+    timefmt, tr, tr_args,
+};
 use eframe::egui;
 use egui_plot::{Bar, BarChart, HoverPosition, Legend, Line, Plot, PlotPoint, PlotPoints};
 
@@ -75,9 +80,14 @@ fn limits_plot(ui: &mut egui::Ui, history: &[Sample]) {
     let origin = history.first().map_or(0, |s| s.ts);
     let span_hours = history.last().map_or(1.0, |s| (s.ts - origin) as f64 / 3600.0).max(1.0);
 
-    let five = series(history, origin, |s| s.five_pct, |s| s.five_resets_at);
-    let week = series(history, origin, |s| s.week_pct, |s| s.week_resets_at);
-    let opus = series(history, origin, |s| s.opus_pct, |s| s.opus_resets_at);
+    let five = series(history, origin, FIVE_HOUR_SECS, |s| s.five_pct, |s| s.five_resets_at);
+    let week = series(history, origin, SEVEN_DAY_SECS, |s| s.week_pct, |s| s.week_resets_at);
+    let opus = series(history, origin, SEVEN_DAY_SECS, |s| s.opus_pct, |s| s.opus_resets_at);
+
+    // Hit-testing goes against the moments actually sampled, not against the
+    // drawn points: the latter now carry the reset drops, which belong to one
+    // series alone and would pull the tooltip off the shared instant.
+    let moments: Vec<f64> = history.iter().map(|s| hours_since(origin, s.ts)).collect();
 
     let series_names = [
         tr("history.series.five_hour"),
@@ -104,7 +114,7 @@ fn limits_plot(ui: &mut egui::Ui, history: &[Sample]) {
         .label_formatter(move |hover| {
             let (HoverPosition::NearDataPoint { position, .. }
             | HoverPosition::Elsewhere { position }) = hover;
-            limits_tooltip(&labels.0, &labels.1, origin, *position)
+            limits_tooltip(&labels.0, &labels.1, &moments, origin, *position)
         });
 
     plot.show(ui, |plot_ui| {
@@ -126,29 +136,27 @@ fn limits_plot(ui: &mut egui::Ui, history: &[Sample]) {
 fn limits_tooltip(
     names: &[String; 3],
     series: &[Points; 3],
+    moments: &[f64],
     origin: i64,
     cursor: PlotPoint,
 ) -> Option<String> {
-    let nearest = series
-        .iter()
-        .filter_map(|points| nearest_point(points, cursor.x))
-        .min_by(|a, b| (a[0] - cursor.x).abs().total_cmp(&(b[0] - cursor.x).abs()))?;
+    let nearest = nearest_moment(moments, cursor.x)?;
 
-    let ts = origin + (nearest[0] * 3600.0) as i64;
+    let ts = origin + (nearest * 3600.0) as i64;
     let mut lines = vec![timefmt::datetime(ts)];
 
     for (name, points) in names.iter().zip(series) {
         // Each series is sampled at the same instants, so pin them all to the
         // hovered moment rather than to each one's own nearest point.
-        if let Some(point) = points.iter().find(|p| p[0] == nearest[0]) {
+        if let Some(point) = points.iter().find(|p| p[0] == nearest) {
             lines.push(format!("{name}: {:.1}%", point[1]));
         }
     }
     (lines.len() > 1).then(|| lines.join("\n"))
 }
 
-fn nearest_point(points: &Points, x: f64) -> Option<[f64; 2]> {
-    points.iter().copied().min_by(|a, b| (a[0] - x).abs().total_cmp(&(b[0] - x).abs()))
+fn nearest_moment(moments: &[f64], x: f64) -> Option<f64> {
+    moments.iter().copied().min_by(|a, b| (a - x).abs().total_cmp(&(b - x).abs()))
 }
 
 /// Sessions started per day.
@@ -341,35 +349,70 @@ fn empty_note(ui: &mut egui::Ui, height: f32) {
     });
 }
 
+fn hours_since(origin: i64, ts: i64) -> f64 {
+    (ts - origin) as f64 / 3600.0
+}
+
 /// Builds a series of `(hours since origin, percent)` points, skipping gaps.
 ///
 /// The percentage is carried forward as a running maximum within each window.
 /// Idle Claude Code sessions keep re-reporting an old reading, so the raw rows
 /// zig-zag between the true value and a stale one; usage never actually drops
-/// inside a window, and the maximum is what really happened. A new window
-/// (different `resets_at`) starts the maximum over.
+/// inside a window, and the maximum is what really happened.
+///
+/// The window boundaries are drawn rather than left to be inferred. A window
+/// holds its level right up to its `resets_at` and the next one begins at
+/// nothing, so the reset gets two points — the old peak and a zero — at the
+/// exact moment it happened. Without them the line sloped from the old peak
+/// down to the first reading of the new window, which can be hours later, and
+/// the drop looked like a gradual decline. The first window in view is anchored
+/// the same way, at its start, when that start falls inside the span.
 fn series(
     samples: &[Sample],
     origin: i64,
+    duration_secs: i64,
     pick: impl Fn(&Sample) -> Option<f64>,
     window: impl Fn(&Sample) -> Option<i64>,
 ) -> Points {
+    let mut points = Points::new();
     let mut peak = f64::NEG_INFINITY;
-    let mut current_window = None;
+    // `None` until the first reading: the opening window has no predecessor to
+    // close off, which is a different case from the boundary moving.
+    let mut seen: Option<Option<i64>> = None;
+    let mut last_ts = origin;
 
-    samples
-        .iter()
-        .filter_map(|s| {
-            let pct = pick(s)?;
-            let boundary = window(s);
-            if boundary != current_window {
-                current_window = boundary;
+    for s in samples {
+        let Some(pct) = pick(s) else { continue };
+        let boundary = window(s);
+
+        match seen {
+            Some(previous) if previous != boundary => {
+                // Guarded against a reset stamped outside the gap it should sit
+                // in — a point out of order would draw the line backwards.
+                if let Some(reset) = previous
+                    && (last_ts..=s.ts).contains(&reset)
+                {
+                    points.push([hours_since(origin, reset), peak]);
+                    points.push([hours_since(origin, reset), 0.0]);
+                }
                 peak = f64::NEG_INFINITY;
             }
-            peak = peak.max(pct);
-            Some([(s.ts - origin) as f64 / 3600.0, peak])
-        })
-        .collect()
+            None => {
+                if let Some(start) = boundary.map(|r| r - duration_secs)
+                    && start >= origin
+                {
+                    points.push([hours_since(origin, start), 0.0]);
+                }
+            }
+            Some(_) => {}
+        }
+
+        seen = Some(boundary);
+        peak = peak.max(pct);
+        points.push([hours_since(origin, s.ts), peak]);
+        last_ts = s.ts;
+    }
+    points
 }
 
 /// Upper Y bound with a little headroom, never zero-height.
@@ -454,7 +497,13 @@ mod tests {
     }
 
     fn five_series(samples: &[Sample]) -> Points {
-        series(samples, samples.first().map_or(0, |s| s.ts), |s| s.five_pct, |s| s.five_resets_at)
+        series(
+            samples,
+            samples.first().map_or(0, |s| s.ts),
+            FIVE_HOUR_SECS,
+            |s| s.five_pct,
+            |s| s.five_resets_at,
+        )
     }
 
     #[test]
@@ -498,24 +547,73 @@ mod tests {
         assert_eq!(ys, vec![90.0, 95.0, 2.0, 5.0], "a reset is not masked by the old peak");
     }
 
+    /// A window that ends must be drawn ending: the old level runs to the reset
+    /// and the new one starts from nought, both at the moment it happened.
     #[test]
-    fn nearest_point_picks_the_closest_x() {
-        let points: Points = vec![[0.0, 1.0], [1.0, 2.0], [5.0, 3.0]];
-        assert_eq!(nearest_point(&points, 0.9), Some([1.0, 2.0]));
-        assert_eq!(nearest_point(&points, 4.0), Some([5.0, 3.0]));
-        assert_eq!(nearest_point(&Points::new(), 1.0), None);
+    fn series_drops_to_zero_at_the_reset() {
+        let reset = 7200;
+        let samples = [
+            window_sample(0, Some(90.0), Some(reset)),
+            window_sample(3600, Some(95.0), Some(reset)),
+            // The first reading of the new window lands an hour after the drop.
+            window_sample(10800, Some(2.0), Some(reset + FIVE_HOUR_SECS)),
+        ];
+
+        let points: Vec<[f64; 2]> = five_series(&samples);
+        assert_eq!(
+            points,
+            vec![[0.0, 90.0], [1.0, 95.0], [2.0, 95.0], [2.0, 0.0], [3.0, 2.0]],
+            "the fall is vertical and sits at the reset, not at the next reading"
+        );
+    }
+
+    /// A reset stamped outside the gap it should sit in would draw the line
+    /// backwards; such a boundary is passed over instead.
+    #[test]
+    fn series_ignores_a_reset_it_cannot_place() {
+        let samples = [
+            window_sample(3600, Some(90.0), Some(100)),
+            window_sample(7200, Some(2.0), Some(200)),
+        ];
+        let ys: Vec<f64> = five_series(&samples).iter().map(|p| p[1]).collect();
+        assert_eq!(ys, vec![90.0, 2.0]);
+    }
+
+    /// When a metric appears later than the plot begins, the window it belongs
+    /// to opened on screen — so it is drawn from nought.
+    #[test]
+    fn series_anchors_a_window_that_opens_inside_the_span() {
+        let start = 6 * 3600;
+        let samples = [
+            window_sample(0, None, None), // the span opens without this metric
+            window_sample(start + 1800, Some(4.0), Some(start + FIVE_HOUR_SECS)),
+        ];
+
+        let points = five_series(&samples);
+        assert_eq!(points, vec![[6.0, 0.0], [6.5, 4.0]]);
+    }
+
+    #[test]
+    fn nearest_moment_picks_the_closest_x() {
+        let moments = [0.0, 1.0, 5.0];
+        assert_eq!(nearest_moment(&moments, 0.9), Some(1.0));
+        assert_eq!(nearest_moment(&moments, 4.0), Some(5.0));
+        assert_eq!(nearest_moment(&[], 1.0), None);
     }
 
     #[test]
     fn limits_tooltip_reports_every_series_at_one_moment() {
         let names = ["5h".to_string(), "week".to_string(), "opus".to_string()];
         let series = [
-            vec![[0.0, 10.0], [1.0, 25.0]],
+            // The first series also carries a reset drop, which belongs to it
+            // alone and must not become the moment the tooltip reports.
+            vec![[0.0, 10.0], [0.5, 10.0], [0.5, 0.0], [1.0, 25.0]],
             vec![[0.0, 50.0], [1.0, 60.0]],
             Points::new(), // this window never arrived
         ];
 
-        let text = limits_tooltip(&names, &series, 0, PlotPoint::new(0.9, 0.0)).unwrap();
+        let text =
+            limits_tooltip(&names, &series, &[0.0, 1.0], 0, PlotPoint::new(0.9, 0.0)).unwrap();
         let lines: Vec<&str> = text.lines().collect();
 
         assert_eq!(lines.len(), 3, "a timestamp and the two present series: {text:?}");
@@ -527,7 +625,7 @@ mod tests {
     fn limits_tooltip_is_empty_without_data() {
         let names = ["a".to_string(), "b".to_string(), "c".to_string()];
         let empty = [Points::new(), Points::new(), Points::new()];
-        assert!(limits_tooltip(&names, &empty, 0, PlotPoint::new(0.0, 0.0)).is_none());
+        assert!(limits_tooltip(&names, &empty, &[], 0, PlotPoint::new(0.0, 0.0)).is_none());
     }
 
     fn stacked_day() -> Vec<(i64, BTreeMap<&'static str, i64>)> {
