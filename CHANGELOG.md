@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.1.0](https://github.com/roxblnfk/claude-status/compare/v1.0.0...v1.1.0) (2026-08-09)
+
+
+### Features
+
+* draw the window resets on the limits plot ([eda2d6d](https://github.com/roxblnfk/claude-status/commit/eda2d6db8c3c5ad723676a6d44d1ff81b764bc50))
+* start with the session on request ([c4b9377](https://github.com/roxblnfk/claude-status/commit/c4b9377ed65655eabab0346c3178f1bb55dc1c41))
+
+
+### Bug Fixes
+
+* **ci:** build the Intel macOS binary on the Apple Silicon runner ([3b313e0](https://github.com/roxblnfk/claude-status/commit/3b313e0e0a930a101ba0b4eeee475f0604660519))
+* **ci:** keep clippy quiet about the unused entry name on macOS ([ec2b600](https://github.com/roxblnfk/claude-status/commit/ec2b60060254731f480b02c962a81e41b43671d5))
+* date the token tooltip and keep model names on one line ([177db01](https://github.com/roxblnfk/claude-status/commit/177db01ccd4b4429fd39b01ea83b88617c96ace3))
+* keep the usage figure off the edge of the fill ([f456b14](https://github.com/roxblnfk/claude-status/commit/f456b14f87246e3a73a30e0dcb93f1bdc5807d3e))
+* line the model table up on the row centre ([3c31017](https://github.com/roxblnfk/claude-status/commit/3c3101735fe4243c2ce668928f76c17e080239bb))
+* rescale the limits plot when the period changes ([c1b2d1a](https://github.com/roxblnfk/claude-status/commit/c1b2d1a9171825da26f02c1c6c99b4f7a73837d9))
+
 ## [1.0.0](https://github.com/roxblnfk/claude-status/compare/v0.1.0...v1.0.0) (2026-08-09)
 
 
