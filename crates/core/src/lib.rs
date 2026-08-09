@@ -3,9 +3,9 @@
 //!
 //! Live subscription limits are not stored anywhere on disk — Claude Code hands
 //! them only to the command configured as `statusLine.command`, feeding it JSON
-//! on stdin (see [`statusline`]). The `claude-status-hook` binary is registered
-//! there ([`install`]), parses that JSON and appends samples to SQLite ([`db`]).
-//! The `claude-status` GUI reads the same database.
+//! on stdin (see [`statusline`]). What gets registered there ([`install`]) is
+//! `claude-status hook` — the same binary as the window, under an argument —
+//! which parses that JSON and appends samples to SQLite ([`db`]).
 
 rust_i18n::i18n!("../../locales", fallback = "en");
 

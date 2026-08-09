@@ -1,9 +1,10 @@
 //! The `statusLine.command` hook: the only place live subscription limits are
 //! visible.
 //!
-//! Claude Code runs this binary on every assistant message and feeds it the
-//! session JSON on stdin. We append the `rate_limits` snapshot to SQLite and
-//! print a status line built from the configured template.
+//! Claude Code runs the program with [`HOOK_ARG`](claude_status_core::install::HOOK_ARG)
+//! on every assistant message and feeds it the session JSON on stdin. We append
+//! the `rate_limits` snapshot to SQLite and print a status line built from the
+//! configured template.
 //!
 //! The overriding requirement is not to disturb Claude Code. Whatever happens,
 //! the process exits with code 0 and prints no garbage to stdout: a broken hook
@@ -26,28 +27,24 @@ use claude_status_core::{
 const DUMP_ENV: &str = "CLAUDE_STATUS_DUMP";
 const DEBUG_ENV: &str = "CLAUDE_STATUS_DEBUG";
 
-fn main() {
-    // Resolve the local time zone before anything else: `time` can only do it
-    // while the process is single-threaded.
-    timefmt::init_local_offset();
-
+/// Reads one payload from stdin and prints one status line. Never fails.
+pub fn run(config: &Config) {
     let mut raw = String::new();
     if std::io::stdin().read_to_string(&mut raw).is_err() {
         return;
     }
 
-    let config = Config::load_and_apply_language();
     dump_raw(&raw, config.debug.dump_path.as_deref());
 
-    match run(&raw, &config) {
+    match collect(&raw, config) {
         Ok(Some(line)) => println!("{line}"),
         Ok(None) => {}
-        Err(e) => debug(format_args!("claude-status-hook: {e:#}")),
+        Err(e) => debug(format_args!("claude-status hook: {e:#}")),
     }
 }
 
 /// Returns the line to print, or `None` when there is nothing to print.
-fn run(raw: &str, config: &Config) -> anyhow::Result<Option<String>> {
+fn collect(raw: &str, config: &Config) -> anyhow::Result<Option<String>> {
     let input = StatuslineInput::parse(raw)?;
     let now = timefmt::now();
 

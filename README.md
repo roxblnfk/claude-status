@@ -36,12 +36,20 @@ no status line, so the hook never fires there. For those, and for long pauses,
 Claude Code can be asked directly: see [Asking Claude Code
 directly](#asking-claude-code-directly).
 
-Hence the two-binary architecture:
+So one binary wears two hats:
 
-| Binary               | Role                                                                                     |
+| Invocation           | Role                                                                                     |
 | -------------------- | ---------------------------------------------------------------------------------------- |
-| `claude-status-hook` | Registered as `statusLine.command`. Parses the JSON, appends a sample to SQLite, prints the status line. Kept light: it runs on every assistant message. |
+| `claude-status hook` | Registered as `statusLine.command`. Parses the JSON, appends a sample to SQLite, prints the status line. Runs on every assistant message. |
 | `claude-status`      | The statistics window and the tray icon. Reads the same database.                        |
+
+The hook used to be a binary of its own, so that the status line would not pay
+for loading the whole window. A download is one file now, and the same saving
+comes from delay-loading: the graphics libraries the window needs are resolved
+on first use instead of at process start, which is what the import table would
+otherwise do on every hook run. Measured on Windows, that is the whole of the
+difference — 14.8 ms with it against 79 ms without, where the separate binary
+took 13.3 ms.
 
 Consequences worth remembering:
 
@@ -106,8 +114,8 @@ source:
 cargo build --release
 ```
 
-Both binaries land in `target/release/` and must stay next to each other:
-`claude-status` looks for the hook in its own directory.
+A single `claude-status` lands in `target/release/`, free to live wherever you
+like — the registration records the path it was at.
 
 Then launch `claude-status` and press **"Register in Claude Code"** on the
 **Settings** tab. The same screen shows the current registration state and lets
@@ -136,10 +144,18 @@ claude-status install [--interval N] [--force]
 claude-status uninstall
 claude-status status             registration state and latest sample
 claude-status preview [template] print the status line
+claude-status probe              ask Claude Code for the limits and store them
+claude-status hook               read one payload from stdin (what Claude Code runs)
 ```
 
 `--interval N` (60 by default) makes Claude Code re-run the hook every N seconds
 on top of the event-driven updates — otherwise samples go stale during pauses.
+
+Moving or renaming the binary leaves the registration pointing at where it used
+to be. That is reported as such — on the **Settings** tab and by `status` —
+rather than passed off as working; registering again repairs it. The same
+applies to an installation made by a release that still had a separate
+`claude-status-hook`.
 
 ## The status line
 
@@ -304,7 +320,7 @@ The hook can be exercised by hand without touching the real settings:
 
 ```bash
 echo '{"model":{"display_name":"Opus"},"rate_limits":{"five_hour":{"used_percentage":52,"resets_at":1800000000}}}' \
-  | CLAUDE_STATUS_DIR=/tmp/cs-test ./target/debug/claude-status-hook
+  | CLAUDE_STATUS_DIR=/tmp/cs-test ./target/debug/claude-status hook
 ```
 
 `CLAUDE_CONFIG_DIR` makes `install`/`uninstall` equally safe to test against a

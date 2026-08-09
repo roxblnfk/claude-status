@@ -81,9 +81,9 @@ jobs:
           src="target/${{ matrix.target }}/release"
           mkdir -p "dist/$name"
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp "$src/claude-status.exe" "$src/claude-status-hook.exe" "dist/$name/"
+            cp "$src/claude-status.exe" "dist/$name/"
           else
-            cp "$src/claude-status" "$src/claude-status-hook" "dist/$name/"
+            cp "$src/claude-status" "dist/$name/"
           fi
           cp README.md README.ru.md "dist/$name/"
           cd dist

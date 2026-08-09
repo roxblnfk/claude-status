@@ -46,12 +46,6 @@ error:
   autostart_write:
     en: could not change the autostart entry
     ru: не удалось изменить запись автозапуска
-  exe_parent:
-    en: the binary has no parent directory
-    ru: у бинарника нет родительского каталога
-  hook_missing:
-    en: "%{hook} not found next to %{exe} — build both binaries (cargo build --release)"
-    ru: "не найден %{hook} рядом с %{exe} — соберите оба бинарника (cargo build --release)"
   foreign_statusline:
     en: |-
       settings.json already defines a third-party statusLine: %{command}
@@ -204,6 +198,8 @@ cli:
         claude-status status                show the registration state and the latest sample
         claude-status preview [template]    print the status line
         claude-status probe                 ask Claude Code for the limits and store them
+        claude-status hook                  read one status line payload from stdin
+                                            (what Claude Code runs; not for hand use)
         claude-status --help                this help
 
       install options:
@@ -229,6 +225,8 @@ cli:
         claude-status status                показать состояние прописки и последний снимок
         claude-status preview [шаблон]      напечатать статусную строку
         claude-status probe                 спросить лимиты у Claude Code и сохранить
+        claude-status hook                  прочитать одну порцию данных со stdin
+                                            (это запускает Claude Code, руками не нужно)
         claude-status --help                эта справка
 
       Ключи install:
@@ -273,6 +271,9 @@ cli:
     ours:
       en: "Hook:  registered (%{command})"
       ru: "Хук:   установлен (%{command})"
+    stale:
+      en: "Hook:  points at another file (%{command}) — run `claude-status install`"
+      ru: "Хук:   ведёт на другой файл (%{command}) — выполните `claude-status install`"
     foreign:
       en: "Hook:  third-party command (%{command})"
       ru: "Хук:   чужая команда (%{command})"
@@ -695,6 +696,16 @@ settings:
     state_ours:
       en: Registered
       ru: Установлен
+    state_stale:
+      en: Registered, but pointing at another file
+      ru: Установлен, но ведёт на другой файл
+    state_stale_note:
+      en: >-
+        Earlier releases shipped a second binary for the hook; the download is
+        one file now. Register again to point the setting at it.
+      ru: >-
+        Раньше хук был отдельным бинарником, теперь в архиве один файл.
+        Нажмите «Прописать», чтобы настройка вела на него.
     state_foreign:
       en: A third-party command is registered
       ru: Прописана сторонняя команда

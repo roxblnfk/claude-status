@@ -94,6 +94,11 @@ fn hook_section(
                 ui.colored_label(crate::ui::level_color(0.0), tr("settings.hook.state_ours"));
                 ui.label(egui::RichText::new(command).weak().small());
             }
+            InstallStatus::Stale { command } => {
+                ui.colored_label(crate::ui::level_color(80.0), tr("settings.hook.state_stale"));
+                ui.label(egui::RichText::new(command).weak().small());
+                ui.label(tr("settings.hook.state_stale_note"));
+            }
             InstallStatus::Foreign { command } => {
                 ui.colored_label(crate::ui::level_color(80.0), tr("settings.hook.state_foreign"));
                 ui.label(egui::RichText::new(command).weak().small());

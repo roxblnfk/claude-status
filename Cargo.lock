@@ -729,7 +729,7 @@ dependencies = [
 
 [[package]]
 name = "claude-status"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "claude-status-core",
@@ -744,7 +744,7 @@ dependencies = [
 
 [[package]]
 name = "claude-status-core"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -757,14 +757,6 @@ dependencies = [
  "time",
  "toml 1.1.4+spec-1.1.0",
  "winreg",
-]
-
-[[package]]
-name = "claude-status-hook"
-version = "1.0.0"
-dependencies = [
- "anyhow",
- "claude-status-core",
 ]
 
 [[package]]

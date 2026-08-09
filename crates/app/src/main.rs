@@ -5,6 +5,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod cli;
+mod hook;
 mod icon;
 mod state;
 mod tray;
@@ -25,10 +26,18 @@ fn main() -> Result<()> {
     // while the process is single-threaded.
     timefmt::init_local_offset();
     // The language has to be in place before any command produces output.
-    Config::load_and_apply_language();
+    let config = Config::load_and_apply_language();
 
     match cli::parse(std::env::args().skip(1))? {
         cli::Command::Gui { hidden } => run_gui(hidden),
+        // Handed the configuration already read: this runs on every assistant
+        // message, so a second read of the same file is worth avoiding. It
+        // reports nothing upwards either — a hook that exits non-zero would
+        // break the session's status line.
+        cli::Command::Hook => {
+            hook::run(&config);
+            Ok(())
+        }
         command => cli::run(command),
     }
 }

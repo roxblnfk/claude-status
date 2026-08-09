@@ -28,6 +28,8 @@ pub enum Command {
     Preview { template: Option<String> },
     /// Ask Claude Code for the current limits and store the answer.
     Probe,
+    /// Read one status line payload from stdin. What Claude Code runs.
+    Hook,
     Help,
 }
 
@@ -45,6 +47,7 @@ pub fn parse(args: impl Iterator<Item = String>) -> Result<Command> {
         "status" => Ok(Command::Status),
         "preview" => Ok(Command::Preview { template: args.get(1).cloned() }),
         "probe" => Ok(Command::Probe),
+        install::HOOK_ARG => Ok(Command::Hook),
         other => bail!(
             "{}\n\n{}",
             tr_args("cli.unknown_command", &[("command", other)]),
@@ -78,7 +81,7 @@ fn parse_install(args: &[String]) -> Result<Command> {
 
 pub fn run(command: Command) -> Result<()> {
     match command {
-        Command::Gui { .. } => unreachable!("the GUI is launched from main"),
+        Command::Gui { .. } | Command::Hook => unreachable!("both are dispatched from main"),
         Command::Help => {
             println!("{}", tr("cli.help"));
             Ok(())
@@ -115,6 +118,9 @@ fn status() -> Result<()> {
     match install::status()? {
         InstallStatus::Ours { command } => {
             println!("{}", tr_args("cli.status.ours", &[("command", &command)]));
+        }
+        InstallStatus::Stale { command } => {
+            println!("{}", tr_args("cli.status.stale", &[("command", &command)]));
         }
         InstallStatus::Foreign { command } => {
             println!("{}", tr_args("cli.status.foreign", &[("command", &command)]));
@@ -248,6 +254,14 @@ mod tests {
     #[test]
     fn the_tray_flag_starts_without_a_window() {
         assert_eq!(parse_args(&["--tray"]).unwrap(), Command::Gui { hidden: true });
+    }
+
+    /// The argument Claude Code is given; the registered command must parse.
+    #[test]
+    fn the_hook_argument_is_what_gets_registered() {
+        assert_eq!(parse_args(&[install::HOOK_ARG]).unwrap(), Command::Hook);
+        let registered = install::command_string(std::path::Path::new("/opt/cs/claude-status"));
+        assert!(registered.ends_with(&format!(" {}", install::HOOK_ARG)), "{registered}");
     }
 
     #[test]
