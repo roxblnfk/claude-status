@@ -163,31 +163,32 @@ fn window_card(ui: &mut egui::Ui, title: &str, w: &WindowState, short_window: bo
 
 /// The usage bar.
 ///
-/// The label sits at the left edge of the bar, so it goes dark once the
-/// coloured fill reaches under it — light text on yellow is unreadable — and
-/// follows the theme while the fill is still too short.
+/// The label is placed by hand rather than handed to the widget, which would
+/// always pin it to the left edge. Every fill colour here is a light one, so
+/// text that lands on the fill is dark and text on the bare track follows the
+/// theme. The awkward case is a short fill: egui never draws it narrower than
+/// the bar is tall, so even a reading of nought leaves a coloured cap under a
+/// left-pinned label. Below the width the label needs, it moves past the edge
+/// of the fill instead of straddling it.
 fn usage_bar(ui: &mut egui::Ui, used_pct: f64) {
     let fraction = (used_pct / 100.0).clamp(0.0, 1.0) as f32;
-    let text = format!("{used_pct:.1}%");
-
     let padding = ui.spacing().item_spacing.x;
-    let text_width = ui
-        .painter()
-        .layout_no_wrap(
-            text.clone(),
-            egui::TextStyle::Button.resolve(ui.style()),
-            egui::Color32::PLACEHOLDER,
-        )
-        .size()
-        .x;
-    let covered = ui.available_width() * fraction >= padding + text_width + padding;
-    let color = if covered { egui::Color32::from_gray(24) } else { ui.visuals().text_color() };
-
-    ui.add(
-        egui::ProgressBar::new(fraction)
-            .fill(level_color(used_pct))
-            .text(egui::RichText::new(text).color(color)),
+    let galley = ui.painter().layout_no_wrap(
+        format!("{used_pct:.1}%"),
+        egui::TextStyle::Button.resolve(ui.style()),
+        egui::Color32::PLACEHOLDER,
     );
+
+    let rect = ui.add(egui::ProgressBar::new(fraction).fill(level_color(used_pct))).rect;
+    let filled = (rect.width() * fraction).max(rect.height());
+
+    let (x, color) = if filled >= padding + galley.size().x + padding {
+        (rect.left() + padding, egui::Color32::from_gray(24))
+    } else {
+        (rect.left() + filled + padding, ui.visuals().text_color())
+    };
+    let pos = egui::pos2(x, rect.center().y - galley.size().y / 2.0);
+    ui.painter().with_clip_rect(rect).galley(pos, galley, color);
 }
 
 /// The "how much may I spend" card — the reason the pace is computed at all.
