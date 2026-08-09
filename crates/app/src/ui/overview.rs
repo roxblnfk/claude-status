@@ -120,11 +120,7 @@ fn window_card(ui: &mut egui::Ui, title: &str, w: &WindowState, short_window: bo
             return;
         };
 
-        ui.add(
-            egui::ProgressBar::new((used_pct / 100.0).clamp(0.0, 1.0) as f32)
-                .fill(level_color(used_pct))
-                .text(format!("{used_pct:.1}%")),
-        );
+        usage_bar(ui, used_pct);
 
         // The even-pace line only makes sense for the weekly window: over five
         // hours a burst of work is normal rather than overspending.
@@ -134,24 +130,58 @@ fn window_card(ui: &mut egui::Ui, title: &str, w: &WindowState, short_window: bo
 
         ui.add_space(4.0);
         let deviation = w.deviation_pct();
+        // Percentage points are a poor unit for a person: the same gap said in
+        // time ("a day ahead") is something one can act on.
+        let gap = timefmt::duration(w.deviation_secs().abs());
         let (verdict, color) = if deviation > 10.0 {
-            (tr("overview.verdict.ahead"), level_color(90.0))
+            (tr_args("overview.verdict.ahead", &[("time", &gap)]), level_color(90.0))
         } else if deviation < -10.0 {
-            (tr("overview.verdict.behind"), level_color(0.0))
+            (tr_args("overview.verdict.behind", &[("time", &gap)]), level_color(0.0))
         } else {
             (tr("overview.verdict.on_track"), level_color(0.0))
         };
         ui.horizontal(|ui| {
             ui.label(tr_args("overview.even_pace", &[("pct", &format!("{:.1}", w.expected_pct()))]));
-            ui.colored_label(
-                color,
-                tr_args(
-                    "overview.deviation",
-                    &[("value", &format!("{deviation:+.1}")), ("verdict", &verdict)],
-                ),
-            );
-        });
+            ui.colored_label(color, verdict);
+        })
+        .response
+        .on_hover_text(tr_args(
+            "overview.even_pace_hint",
+            &[
+                ("expected", &format!("{:.1}", w.expected_pct())),
+                ("used", &format!("{used_pct:.1}")),
+            ],
+        ));
     });
+}
+
+/// The usage bar.
+///
+/// The label sits at the left edge of the bar, so it goes dark once the
+/// coloured fill reaches under it — light text on yellow is unreadable — and
+/// follows the theme while the fill is still too short.
+fn usage_bar(ui: &mut egui::Ui, used_pct: f64) {
+    let fraction = (used_pct / 100.0).clamp(0.0, 1.0) as f32;
+    let text = format!("{used_pct:.1}%");
+
+    let padding = ui.spacing().item_spacing.x;
+    let text_width = ui
+        .painter()
+        .layout_no_wrap(
+            text.clone(),
+            egui::TextStyle::Button.resolve(ui.style()),
+            egui::Color32::PLACEHOLDER,
+        )
+        .size()
+        .x;
+    let covered = ui.available_width() * fraction >= padding + text_width + padding;
+    let color = if covered { egui::Color32::from_gray(24) } else { ui.visuals().text_color() };
+
+    ui.add(
+        egui::ProgressBar::new(fraction)
+            .fill(level_color(used_pct))
+            .text(egui::RichText::new(text).color(color)),
+    );
 }
 
 /// The "how much may I spend" card — the reason the pace is computed at all.
@@ -166,7 +196,7 @@ fn budget_card(ui: &mut egui::Ui, state: &AppState, w: &WindowState, now: i64) {
             ui.label(format!("{:.1}%", w.remaining_pct()));
             ui.end_row();
 
-            ui.label(tr("overview.budget.per_day"));
+            ui.label(tr("overview.budget.per_day")).on_hover_text(tr("overview.budget.per_day_hint"));
             match w.allowance_per_day_pct() {
                 Some(per_day) => ui.label(tr_args(
                     "overview.budget.per_day_value",
@@ -179,7 +209,7 @@ fn budget_card(ui: &mut egui::Ui, state: &AppState, w: &WindowState, now: i64) {
             };
             ui.end_row();
 
-            ui.label(tr("overview.budget.today"));
+            ui.label(tr("overview.budget.today")).on_hover_text(tr("overview.budget.today_hint"));
             match w.allowance_until(timefmt::end_of_local_day(now)) {
                 Some(left) => ui.label(tr_args(
                     "overview.budget.today_value",
@@ -189,20 +219,25 @@ fn budget_card(ui: &mut egui::Ui, state: &AppState, w: &WindowState, now: i64) {
             };
             ui.end_row();
 
-            ui.label(tr("overview.budget.pace"));
+            ui.label(tr("overview.budget.pace")).on_hover_text(tr("overview.budget.pace_hint"));
             match state.overview.week_burn_pct_per_day {
                 Some(burn) => {
                     let projected = w.projected_used_at_reset(burn);
-                    ui.colored_label(
-                        level_color(projected),
+                    // Above 100 the projection stops being a figure worth
+                    // printing: the limit simply ends earlier, and the next row
+                    // says when.
+                    let text = if projected > 100.0 {
+                        tr_args("overview.budget.pace_over", &[("burn", &format!("{burn:.1}"))])
+                    } else {
                         tr_args(
                             "overview.budget.pace_value",
                             &[
                                 ("burn", &format!("{burn:.1}")),
                                 ("projected", &format!("{projected:.0}")),
                             ],
-                        ),
-                    )
+                        )
+                    };
+                    ui.colored_label(level_color(projected), text)
                 }
                 None => ui.label(tr("overview.budget.pace_unknown")),
             };
@@ -225,7 +260,47 @@ fn budget_card(ui: &mut egui::Ui, state: &AppState, w: &WindowState, now: i64) {
                 ui.end_row();
             }
         });
+
+        // The numbers above answer "how much"; this line answers "so what do I
+        // do" — the question the card exists for.
+        if let Some((advice, color)) = advice(state, w, now) {
+            ui.add_space(6.0);
+            ui.separator();
+            ui.add_space(2.0);
+            match color {
+                Some(color) => ui.colored_label(color, advice),
+                None => ui.label(advice),
+            };
+        }
     });
+}
+
+/// The plain-language conclusion drawn from the numbers of the budget card.
+///
+/// `None` when the window is about to reset and a daily rate has stopped making
+/// sense.
+fn advice(state: &AppState, w: &WindowState, now: i64) -> Option<(String, Option<egui::Color32>)> {
+    let per_day = format!("{:.1}", w.allowance_per_day_pct()?);
+    let today = format!("{:.1}", w.allowance_until(timefmt::end_of_local_day(now))?);
+
+    if let Some(burn) = state.overview.week_burn_pct_per_day
+        && let Some(at) = w.exhausted_at(burn)
+    {
+        let text = tr_args(
+            "overview.budget.advice.slow_down",
+            &[("time", &timefmt::datetime(at)), ("pct", &per_day)],
+        );
+        return Some((text, Some(level_color(100.0))));
+    }
+
+    if w.deviation_pct() > 10.0 {
+        let text = tr_args("overview.budget.advice.ahead", &[("pct", &per_day)]);
+        return Some((text, Some(level_color(80.0))));
+    }
+
+    let text =
+        tr_args("overview.budget.advice.on_track", &[("pct", &per_day), ("today", &today)]);
+    Some((text, None))
 }
 
 fn freshness(ui: &mut egui::Ui, state: &AppState, now: i64) {

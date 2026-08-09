@@ -409,21 +409,25 @@ overview:
     en: "resets %{time} · in %{left}"
     ru: "сброс %{time} · через %{left}"
   even_pace:
-    en: "Even pace: %{pct}%"
-    ru: "Равномерный график: %{pct}%"
+    en: "Even pace by now: %{pct}%"
+    ru: "По графику сейчас: %{pct}%"
+  even_pace_hint:
+    en: >-
+      The even pace spreads the weekly limit equally over all seven days. By now
+      it allows %{expected}%; %{used}% has been spent.
+    ru: >-
+      Равномерный график растягивает недельный лимит поровну на все семь дней. К
+      этому моменту он допускает %{expected}%, а потрачено %{used}%.
   verdict:
     ahead:
-      en: spending faster than the even pace
-      ru: тратим быстрее равномерного графика
+      en: "%{time} ahead of schedule"
+      ru: "опережаете график на %{time}"
     behind:
-      en: comfortably within budget
-      ru: идём с запасом
+      en: "%{time} behind schedule — that is spare limit"
+      ru: "отстаёте от графика на %{time} — это запас"
     on_track:
-      en: on track
-      ru: в графике
-  deviation:
-    en: "(%{value} pp, %{verdict})"
-    ru: "(%{value} п.п., %{verdict})"
+      en: on schedule
+      ru: идёте по графику
   budget:
     title:
       en: Recommendation
@@ -434,24 +438,66 @@ overview:
     per_day:
       en: Daily budget
       ru: Норма в сутки
+    per_day_hint:
+      en: >-
+        The limit left, divided by the days left. Keep to it and the limit lasts
+        exactly until the reset.
+      ru: >-
+        Остаток лимита, делённый на оставшиеся дни. Если держаться этой нормы,
+        лимита хватит ровно до сброса.
     per_day_value:
       en: "%{pct}% — to land exactly within the remaining %{left}"
       ru: "%{pct}% — чтобы ровно уложиться в оставшиеся %{left}"
     today:
       en: Still available today
       ru: Можно ещё сегодня
+    today_hint:
+      en: The daily budget, scaled to the hours left before midnight.
+      ru: Та же норма, пересчитанная на часы, оставшиеся до полуночи.
     today_value:
       en: "%{pct}% (until midnight)"
       ru: "%{pct}% (до полуночи)"
     pace:
-      en: Actual pace
-      ru: Фактический темп
+      en: Spending now
+      ru: Тратится сейчас
+    pace_hint:
+      en: >-
+        How fast the limit has actually been going during the current window,
+        and where that rate leads if it keeps up.
+      ru: >-
+        С какой скоростью лимит расходуется на самом деле в текущем окне и к
+        чему такая скорость приведёт, если её не менять.
     pace_value:
-      en: "%{burn}%/day → %{projected}% by reset"
-      ru: "%{burn}%/сут → к сбросу %{projected}%"
+      en: "%{burn}% a day — %{projected}% of the limit spent by the reset"
+      ru: "%{burn}% в сутки — к сбросу уйдёт %{projected}% лимита"
+    pace_over:
+      en: "%{burn}% a day — at this rate the limit runs out before the reset"
+      ru: "%{burn}% в сутки — при такой скорости лимит кончится раньше сброса"
     pace_unknown:
       en: not enough data yet
       ru: данных пока мало
+    advice:
+      slow_down:
+        en: >-
+          Ease off: at the current rate the limit runs out on %{time}. Staying
+          under %{pct}% a day makes it last until the reset.
+        ru: >-
+          Стоит сбавить: при текущей скорости лимит кончится %{time}. Чтобы его
+          хватило до сброса, держитесь не более %{pct}% в сутки.
+      ahead:
+        en: >-
+          You are ahead of the even pace, but the limit still holds. Keep to
+          about %{pct}% a day to stay comfortable.
+        ru: >-
+          Вы опережаете равномерный график, но лимита пока хватает. Ориентир —
+          около %{pct}% в сутки.
+      on_track:
+        en: >-
+          On track. There is room for %{pct}% a day until the reset, %{today}%
+          of it today.
+        ru: >-
+          Всё в порядке. До сброса можно тратить по %{pct}% в сутки, из них
+          %{today}% — ещё сегодня.
     exhausted:
       en: Limit runs out
       ru: Лимит кончится

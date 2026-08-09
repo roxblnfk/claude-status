@@ -73,6 +73,15 @@ impl WindowState {
         self.used_pct - self.expected_pct()
     }
 
+    /// The same deviation expressed as time: how far along the window the even
+    /// pace would have to run to reach what is already spent.
+    ///
+    /// "A day ahead of schedule" is something a person can act on; the same gap
+    /// in percentage points is not.
+    pub fn deviation_secs(&self) -> i64 {
+        (self.deviation_pct() / 100.0 * self.duration_secs as f64) as i64
+    }
+
     pub fn remaining_pct(&self) -> f64 {
         (100.0 - self.used_pct).max(0.0)
     }
@@ -232,6 +241,19 @@ mod tests {
         // After six days only 20 % is gone — plenty of headroom.
         let w = week(20.0, 6 * DAY);
         assert!(w.deviation_pct() < -60.0, "underspending: {}", w.deviation_pct());
+    }
+
+    #[test]
+    fn deviation_converts_to_the_span_it_covers() {
+        // One day in, 30 % spent while the diagonal allows 1/7: the surplus of
+        // ~15.7 pp is what the even pace would spend in about 1.1 days.
+        let w = week(30.0, DAY);
+        let expected = (w.deviation_pct() / 100.0 * SEVEN_DAY_SECS as f64) as i64;
+        assert_eq!(w.deviation_secs(), expected);
+        assert!(w.deviation_secs() > DAY, "{}", w.deviation_secs());
+
+        // Underspending points the other way.
+        assert!(week(20.0, 6 * DAY).deviation_secs() < 0);
     }
 
     #[test]
