@@ -282,14 +282,20 @@ adding a variant to every key plus an entry in `Language` in
 | Path                                | What it is                                      |
 | ----------------------------------- | ----------------------------------------------- |
 | `<data>/usage.sqlite3`              | limit samples and daily tokens per model        |
+| `<data>/usage.sqlite3.bak`          | copy taken before the statistics are reset      |
 | `<data>/config.toml`                | settings                                        |
 | `<data>/settings.json.bak`          | backup of the Claude Code settings              |
 | `<data>/previous-statusline.json`   | the third-party command displaced by `--force`  |
 
-`<data>` is `%LOCALAPPDATA%\claude-status` on Windows,
-`~/.local/share/claude-status` on Linux and
+`<data>` is `%APPDATA%\claude-status` on Windows — the roaming one, not
+`%LOCALAPPDATA%` — `~/.local/share/claude-status` on Linux and
 `~/Library/Application Support/claude-status` on macOS. Overridden by
-`CLAUDE_STATUS_DIR`.
+`CLAUDE_STATUS_DIR`. The full path is shown in the window, under
+**Settings → Program**.
+
+`CLAUDE_STATUS_DUMP` and `[debug] dump_path` add one more:
+`raw-statusline.jsonl`, which grows by a line for every message and is never
+pruned.
 
 Samples collapse: a new row appears only when the percentages or the window
 boundaries change, compared per session — otherwise the hook would pile up

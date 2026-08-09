@@ -274,13 +274,18 @@ macOS. В записи стоит `--tray`, поэтому при входе в 
 | Путь                                | Что это                                   |
 | ----------------------------------- | ----------------------------------------- |
 | `<data>/usage.sqlite3`              | снимки лимитов и дневные токены по моделям |
+| `<data>/usage.sqlite3.bak`          | копия перед сбросом статистики             |
 | `<data>/config.toml`                | настройки                                  |
 | `<data>/settings.json.bak`          | резервная копия настроек Claude Code       |
 | `<data>/previous-statusline.json`   | вытесненная `--force` чужая команда        |
 
-`<data>` — `%LOCALAPPDATA%\claude-status` на Windows,
-`~/.local/share/claude-status` на Linux, `~/Library/Application Support/claude-status`
-на macOS. Переопределяется через `CLAUDE_STATUS_DIR`.
+`<data>` — `%APPDATA%\claude-status` на Windows (именно роуминговый, не
+`%LOCALAPPDATA%`), `~/.local/share/claude-status` на Linux,
+`~/Library/Application Support/claude-status` на macOS. Переопределяется через
+`CLAUDE_STATUS_DIR`. Полный путь показан в окне, в **«Настройки → Приложение»**.
+
+`CLAUDE_STATUS_DUMP` и `[debug] dump_path` добавляют ещё один файл —
+`raw-statusline.jsonl`: он растёт на строку с каждого сообщения и не чистится.
 
 Снимки схлопываются: новая строка появляется, только когда изменились проценты
 или границы окон, причём сравнение идёт в пределах одной сессии, — иначе хук на
