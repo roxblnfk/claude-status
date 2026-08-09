@@ -121,22 +121,22 @@ impl AppState {
         let mut lines = vec![tr("tray.tooltip.title")];
 
         if let Some(w) = self.overview.five_hour {
-            lines.push(tr_args(
-                "tray.tooltip.five_hour",
-                &[
-                    ("pct", &format!("{:.0}", w.used_pct)),
-                    ("reset", &timefmt::clock(w.resets_at)),
-                ],
-            ));
+            lines.push(match w.live_used_pct() {
+                Some(pct) => tr_args(
+                    "tray.tooltip.five_hour",
+                    &[("pct", &format!("{pct:.0}")), ("reset", &timefmt::clock(w.resets_at))],
+                ),
+                None => tr("tray.tooltip.five_hour_expired"),
+            });
         }
         if let Some(w) = self.overview.week {
-            lines.push(tr_args(
-                "tray.tooltip.week",
-                &[
-                    ("pct", &format!("{:.0}", w.used_pct)),
-                    ("reset", &timefmt::date(w.resets_at)),
-                ],
-            ));
+            lines.push(match w.live_used_pct() {
+                Some(pct) => tr_args(
+                    "tray.tooltip.week",
+                    &[("pct", &format!("{pct:.0}")), ("reset", &timefmt::date(w.resets_at))],
+                ),
+                None => tr("tray.tooltip.week_expired"),
+            });
             if let Some(per_day) = w.allowance_per_day_pct() {
                 lines.push(tr_args(
                     "tray.tooltip.allowance",
@@ -211,6 +211,26 @@ mod tests {
     fn tooltip_reports_absence_of_data() {
         let state = state_with(Overview::default());
         assert_eq!(state.tooltip().lines().count(), 2, "{}", state.tooltip());
+    }
+
+    #[test]
+    fn tooltip_hides_the_percentage_of_a_window_that_has_reset() {
+        let now = timefmt::now();
+        // Both windows closed an hour ago: the readings describe windows that
+        // no longer exist, so the figures must not be quoted as current.
+        let sample = Sample {
+            id: 1,
+            ts: now - 7200,
+            last_seen_ts: now - 7200,
+            five_pct: Some(36.0),
+            five_resets_at: Some(now - 3600),
+            week_pct: Some(41.0),
+            week_resets_at: Some(now - 3600),
+            ..Sample::default()
+        };
+        let tip = state_with(Overview::from_samples(&[sample], now)).tooltip();
+        assert!(!tip.contains("36%"), "{tip}");
+        assert!(!tip.contains("41%"), "{tip}");
     }
 
     #[test]

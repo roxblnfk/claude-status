@@ -96,8 +96,8 @@ impl Tray {
 
     /// Redraws the icon and the tooltip when the data has changed.
     pub fn update(&mut self, state: &AppState) -> Result<()> {
-        let ring = state.ring_window().map(|w| w.used_pct);
-        let dot = state.dot_window().map(|w| w.used_pct);
+        let ring = state.ring_window().and_then(|w| w.live_used_pct());
+        let dot = state.dot_window().and_then(|w| w.live_used_pct());
 
         // Rounded to a percent: the icon does not change below that anyway, and
         // updating a system icon is not cheap.

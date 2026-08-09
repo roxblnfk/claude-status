@@ -42,6 +42,9 @@ Consequences worth remembering:
 - While Claude Code is not running there are no new samples. That is not a
   fault: nothing is being spent during that time either. The window shows the
   age of the latest sample.
+- If a pause outlasts the window, the last reading describes a window that has
+  since reset. Such a figure is not shown as current — the gauge stays empty
+  and the reading is quoted separately as the last known one.
 - `rate_limits` carry no per-model split — that comes from
   `~/.claude/stats-cache.json`, which Claude Code computes itself.
 

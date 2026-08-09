@@ -38,6 +38,15 @@ impl WindowState {
         self.now >= self.resets_at
     }
 
+    /// Usage as it may be shown to the user.
+    ///
+    /// `None` once the window has reset: the recorded percentage belongs to a
+    /// window that no longer exists, and how much of the new one is spent stays
+    /// unknown until Claude Code reports again.
+    pub fn live_used_pct(&self) -> Option<f64> {
+        (!self.is_expired()).then_some(self.used_pct)
+    }
+
     pub fn remaining_secs(&self) -> i64 {
         (self.resets_at - self.now).max(0)
     }
@@ -270,6 +279,9 @@ mod tests {
     fn expired_window_is_detected() {
         assert!(!week(50.0, SEVEN_DAY_SECS - 1).is_expired());
         assert!(week(50.0, SEVEN_DAY_SECS).is_expired());
+        // The percentage belongs to the window that has just gone.
+        assert_eq!(week(50.0, SEVEN_DAY_SECS - 1).live_used_pct(), Some(50.0));
+        assert_eq!(week(50.0, SEVEN_DAY_SECS).live_used_pct(), None);
     }
 
     fn sample(id: i64, ts: i64, week_pct: f64, week_resets_at: i64) -> Sample {

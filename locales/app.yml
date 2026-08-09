@@ -310,6 +310,12 @@ tray:
     week:
       en: "week %{pct}% ⟳%{reset}"
       ru: "нед %{pct}% ⟳%{reset}"
+    five_hour_expired:
+      en: 5h — window reset, no data yet
+      ru: 5ч — окно сброшено, данных нет
+    week_expired:
+      en: week — window reset, no data yet
+      ru: нед — окно сброшено, данных нет
     allowance:
       en: "budget %{pct}%/day"
       ru: "норма %{pct}%/сут"
@@ -393,6 +399,12 @@ overview:
   expired:
     en: window has already reset
     ru: окно уже сброшено
+  expired_bar:
+    en: no data since the reset
+    ru: нет данных после сброса
+  last_known:
+    en: "Last reading: %{pct}% — in the window that reset on %{time}"
+    ru: "Последнее значение: %{pct}% — в окне, сброшенном %{time}"
   resets:
     en: "resets %{time} · in %{left}"
     ru: "сброс %{time} · через %{left}"

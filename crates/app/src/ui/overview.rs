@@ -28,7 +28,9 @@ pub fn draw(ui: &mut egui::Ui, state: &AppState) -> Option<Tab> {
             ui.add_space(8.0);
         }
 
-        if let Some(w) = state.overview.week {
+        // The advice is about the current week; once it has rolled over there
+        // is nothing to divide between the remaining days.
+        if let Some(w) = state.overview.week.filter(|w| !w.is_expired()) {
             budget_card(ui, state, &w, now);
         }
 
@@ -94,10 +96,34 @@ fn window_card(ui: &mut egui::Ui, title: &str, w: &WindowState, short_window: bo
         });
 
         ui.add_space(4.0);
+
+        // Past the reset the recorded percentage describes a window that is
+        // gone; the new one has not been reported yet, so there is nothing to
+        // fill the bar with.
+        let Some(used_pct) = w.live_used_pct() else {
+            ui.add(
+                egui::ProgressBar::new(0.0)
+                    .fill(ui.visuals().widgets.inactive.bg_fill)
+                    .text(tr("overview.expired_bar")),
+            );
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(tr_args(
+                    "overview.last_known",
+                    &[
+                        ("pct", &format!("{:.1}", w.used_pct)),
+                        ("time", &timefmt::datetime(w.resets_at)),
+                    ],
+                ))
+                .weak(),
+            );
+            return;
+        };
+
         ui.add(
-            egui::ProgressBar::new((w.used_pct / 100.0).clamp(0.0, 1.0) as f32)
-                .fill(level_color(w.used_pct))
-                .text(format!("{:.1}%", w.used_pct)),
+            egui::ProgressBar::new((used_pct / 100.0).clamp(0.0, 1.0) as f32)
+                .fill(level_color(used_pct))
+                .text(format!("{used_pct:.1}%")),
         );
 
         // The even-pace line only makes sense for the weekly window: over five
