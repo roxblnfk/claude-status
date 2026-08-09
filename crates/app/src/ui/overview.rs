@@ -344,4 +344,21 @@ fn freshness(ui: &mut egui::Ui, state: &AppState, now: i64) {
     // rather than a fault. Mention it, but without alarm.
     let key = if staleness > 3600 { "overview.freshness_stale" } else { "overview.freshness" };
     ui.label(egui::RichText::new(tr_args(key, &[("age", &age)])).weak());
+
+    // A reading can arrive seconds ago and still describe a window that closed
+    // hours back: Claude Code refreshes the limits only when it gets a reply,
+    // and an idle session keeps resending the last ones it saw. Without this
+    // note the screen contradicts itself — "updated a minute ago" next to "no
+    // data since the reset".
+    let repeating = [state.overview.five_hour, state.overview.week]
+        .iter()
+        .flatten()
+        .any(|w| w.is_expired());
+    if repeating {
+        ui.label(
+            egui::RichText::new(tr("overview.freshness_repeating"))
+                .weak()
+                .color(level_color(80.0)),
+        );
+    }
 }

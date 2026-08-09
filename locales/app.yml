@@ -547,6 +547,15 @@ overview:
   freshness_stale:
     en: "Updated %{age} ago — Claude Code does not seem to be running"
     ru: "Обновлено %{age} назад — Claude Code, похоже, не запущен"
+  freshness_repeating:
+    en: >-
+      Claude Code is repeating figures from a window that has already closed —
+      it refreshes them only when a session receives a reply. They will catch up
+      after the next message in a session where the status line is shown.
+    ru: >-
+      Claude Code повторяет цифры из окна, которое уже закрылось: он обновляет
+      их только когда сессия получает ответ. Данные догонят реальность после
+      очередного сообщения в сессии, где отображается статусная строка.
 
 history:
   limits:
