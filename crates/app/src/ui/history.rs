@@ -10,7 +10,9 @@ use claude_status_core::{
     timefmt, tr, tr_args,
 };
 use eframe::egui;
-use egui_plot::{Bar, BarChart, HoverPosition, Legend, Line, Plot, PlotPoint, PlotPoints};
+use egui_plot::{
+    Bar, BarChart, Corner, HoverPosition, Legend, Line, Plot, PlotPoint, PlotPoints,
+};
 
 use crate::state::{AppState, Range};
 use crate::ui::human_tokens;
@@ -99,8 +101,8 @@ fn limits_plot(ui: &mut egui::Ui, history: &[Sample]) {
     // Lines go through the plot's own `label_formatter`, which renders a real
     // egui tooltip — no hover delay, kept on screen, on a proper background.
     let labels = (series_names.clone(), all.clone());
-    let plot = grounded(Plot::new("limits").height(LIMITS_HEIGHT))
-        .legend(Legend::default())
+    let id = plot_id("limits");
+    let plot = grounded(ui, id, LIMITS_HEIGHT)
         // Percentages live in 0..100 — anything else is not a view worth
         // panning to, so the axis is pinned instead of auto-fitted.
         .default_y_bounds(0.0, 100.0)
@@ -117,7 +119,7 @@ fn limits_plot(ui: &mut egui::Ui, history: &[Sample]) {
             limits_tooltip(&labels.0, &labels.1, &moments, origin, *position)
         });
 
-    plot.show(ui, |plot_ui| {
+    let response = plot.show(ui, |plot_ui| {
         // Re-applied every frame: the `default_*` bounds only seed the very
         // first one, and a plot keeps its view in egui's memory ever after.
         // Without this the period buttons changed the data underneath a frozen
@@ -130,6 +132,7 @@ fn limits_plot(ui: &mut egui::Ui, history: &[Sample]) {
             plot_ui.line(Line::new(name.clone(), PlotPoints::from(points)).width(2.0));
         }
     });
+    remember_legend_corner(ui, id, response.response.hovered());
 }
 
 /// Value of every series at the moment nearest the cursor.
@@ -176,7 +179,8 @@ fn sessions_plot(ui: &mut egui::Ui, stats: &StatsCache) {
     let ceiling = y_ceiling(days.iter().map(|(_, value)| *value));
     let label = tr("history.sessions.series");
 
-    let response = daily_plot("sessions", &days, DAILY_HEIGHT).show(ui, |plot_ui| {
+    let id = plot_id("sessions");
+    let response = daily_plot(ui, id, &days, DAILY_HEIGHT).show(ui, |plot_ui| {
         plot_ui.set_plot_bounds_y(0.0..=ceiling);
         plot_ui.bar_chart(
             BarChart::new(label.clone(), bars)
@@ -192,6 +196,7 @@ fn sessions_plot(ui: &mut egui::Ui, stats: &StatsCache) {
         let (_, count) = days.iter().find(|(d, _)| *d == day)?;
         Some(format!("{}\n{label}: {count:.0}", timefmt::format_day_number(day)))
     });
+    remember_legend_corner(ui, id, response.response.hovered());
     show_tooltip(&response.response, tooltip);
 }
 
@@ -232,7 +237,8 @@ fn tokens_plot(ui: &mut egui::Ui, stats: &StatsCache) {
 
     let ceiling = y_ceiling(totals.iter().map(|(_, value)| *value));
 
-    let response = daily_plot("tokens", &totals, TOKENS_HEIGHT).show(ui, |plot_ui| {
+    let id = plot_id("tokens");
+    let response = daily_plot(ui, id, &totals, TOKENS_HEIGHT).show(ui, |plot_ui| {
         plot_ui.set_plot_bounds_y(0.0..=ceiling);
         for chart in charts {
             plot_ui.bar_chart(chart);
@@ -241,6 +247,7 @@ fn tokens_plot(ui: &mut egui::Ui, stats: &StatsCache) {
     });
 
     let tooltip = response.inner.and_then(|point| tokens_tooltip(&per_day, &models, point));
+    remember_legend_corner(ui, id, response.response.hovered());
     show_tooltip(&response.response, tooltip);
 }
 
@@ -279,17 +286,20 @@ fn tokens_of(day_models: &BTreeMap<&str, i64>, model: &str) -> i64 {
 }
 
 /// Shared setup for the two daily plots: pinned axes and date labels.
-fn daily_plot<'a>(id: &str, days: &[(i64, f64)], height: f32) -> Plot<'a> {
+fn daily_plot<'a>(ui: &egui::Ui, id: egui::Id, days: &[(i64, f64)], height: f32) -> Plot<'a> {
     let first = days.first().map_or(0, |(day, _)| *day);
     let last = days.last().map_or(first + 1, |(day, _)| *day);
 
-    grounded(Plot::new(id.to_string()).height(height))
-        .legend(Legend::default())
+    grounded(ui, id, height)
         // Half a day of padding on each side so the outermost bars are not
         // sliced in half by the plot edge.
         .default_x_bounds(first as f64 - 0.5, last as f64 + 0.5)
         .default_y_bounds(0.0, y_ceiling(days.iter().map(|(_, value)| *value)))
         .x_axis_formatter(|mark, _| timefmt::format_day_number(mark.value.round() as i64))
+}
+
+fn plot_id(name: &str) -> egui::Id {
+    egui::Id::new(("claude-status-plot", name))
 }
 
 /// Pins a plot in place and hides the Y axis labels.
@@ -301,13 +311,48 @@ fn daily_plot<'a>(id: &str, days: &[(i64, f64)], height: f32) -> Plot<'a> {
 ///
 /// `show_x`/`show_y` stay on: the whole hover pipeline hangs off them, and
 /// switching them off also disables highlighting the element under the cursor.
-fn grounded(plot: Plot<'_>) -> Plot<'_> {
-    plot.allow_drag(false)
+fn grounded<'a>(ui: &egui::Ui, id: egui::Id, height: f32) -> Plot<'a> {
+    Plot::new(id)
+        // Stated rather than derived, so `PlotMemory` can be read back under
+        // the same name — that is where the legend hover lands.
+        .id(id)
+        .height(height)
+        .legend(Legend::default().position(legend_corner(ui, id)))
+        .allow_drag(false)
         .allow_zoom(false)
         .allow_scroll(false)
         .allow_boxed_zoom(false)
         .set_margin_fraction(egui::Vec2::new(0.02, 0.0))
         .show_axes([true, false])
+}
+
+/// Which corner the legend sits in this frame.
+///
+/// It is parked over the data by definition, and on a busy plot it hides the
+/// very thing being examined. Hovering it sends it to the other side.
+fn legend_corner(ui: &egui::Ui, id: egui::Id) -> Corner {
+    if displaced(ui, id) { Corner::LeftTop } else { Corner::RightTop }
+}
+
+/// Decides where the legend goes next, once the plot has been drawn.
+///
+/// It comes back only after the pointer has left the plot, not the moment it
+/// is no longer underneath: stepping out from under the cursor ends the hover,
+/// which would bring it straight back under the cursor and set it flickering
+/// between the two corners every frame.
+fn remember_legend_corner(ui: &egui::Ui, id: egui::Id, plot_hovered: bool) {
+    let hovered = egui_plot::PlotMemory::load(ui.ctx(), id)
+        .is_some_and(|memory| memory.hovered_legend_item.is_some());
+    let moved = hovered || (displaced(ui, id) && plot_hovered);
+    ui.data_mut(|data| data.insert_temp(displaced_id(id), moved));
+}
+
+fn displaced(ui: &egui::Ui, id: egui::Id) -> bool {
+    ui.data(|data| data.get_temp(displaced_id(id))).unwrap_or(false)
+}
+
+fn displaced_id(id: egui::Id) -> egui::Id {
+    id.with("legend-displaced")
 }
 
 /// Shows a hover label for a bar chart.
