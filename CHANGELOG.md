@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.3.0](https://github.com/roxblnfk/claude-status/compare/v1.2.0...v1.3.0) (2026-08-10)
+
+
+### Features
+
+* move the legend out from under the cursor ([5546be5](https://github.com/roxblnfk/claude-status/commit/5546be576295f054272ec182c26d93883781396c))
+
+
+### Documentation
+
+* cut the README down to what a user needs ([c19dbdf](https://github.com/roxblnfk/claude-status/commit/c19dbdf02004645119b9233352e757b6277baa46))
+* name the data directory Windows actually uses ([9f6f321](https://github.com/roxblnfk/claude-status/commit/9f6f321171faba5c3f34a5fce3e60ad6857f226e))
+* write down what a session has to know ([58eddac](https://github.com/roxblnfk/claude-status/commit/58eddac632ab23eb778821ac5e97663f66d18ae5))
+
 ## [1.2.0](https://github.com/roxblnfk/claude-status/compare/v1.1.0...v1.2.0) (2026-08-09)
 
 
