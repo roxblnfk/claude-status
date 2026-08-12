@@ -496,6 +496,14 @@ overview:
   resets:
     en: "resets %{time} · in %{left}"
     ru: "сброс %{time} · через %{left}"
+  elapsed_hint:
+    en: >-
+      The tick marks how much of the window itself is gone: %{elapsed} of
+      %{total}, or %{pct}%. Fill short of it means spending slower than the
+      clock.
+    ru: >-
+      Засечка показывает, сколько прошло самого окна: %{elapsed} из %{total},
+      это %{pct}%. Заполнение до неё — расход медленнее хода часов.
   even_pace:
     en: "Even pace by now: %{pct}%"
     ru: "По графику сейчас: %{pct}%"

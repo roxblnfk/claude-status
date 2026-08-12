@@ -126,7 +126,7 @@ fn window_card(ui: &mut egui::Ui, title: &str, w: &WindowState, short_window: bo
             return;
         };
 
-        usage_bar(ui, used_pct);
+        usage_bar(ui, used_pct, w);
 
         // The even-pace line only makes sense for the weekly window: over five
         // hours a burst of work is normal rather than overspending.
@@ -170,7 +170,7 @@ fn window_card(ui: &mut egui::Ui, title: &str, w: &WindowState, short_window: bo
 /// the bar is tall, so even a reading of nought leaves a coloured cap under a
 /// left-pinned label. Below the width the label needs, it moves past the edge
 /// of the fill instead of straddling it.
-fn usage_bar(ui: &mut egui::Ui, used_pct: f64) {
+fn usage_bar(ui: &mut egui::Ui, used_pct: f64, w: &WindowState) {
     let fraction = (used_pct / 100.0).clamp(0.0, 1.0) as f32;
     let padding = ui.spacing().item_spacing.x;
     let galley = ui.painter().layout_no_wrap(
@@ -179,8 +179,11 @@ fn usage_bar(ui: &mut egui::Ui, used_pct: f64) {
         egui::Color32::PLACEHOLDER,
     );
 
-    let rect = ui.add(egui::ProgressBar::new(fraction).fill(level_color(used_pct))).rect;
+    let bar = ui.add(egui::ProgressBar::new(fraction).fill(level_color(used_pct)));
+    let rect = bar.rect;
     let filled = (rect.width() * fraction).max(rect.height());
+
+    elapsed_tick(ui, rect, filled, w);
 
     let (x, color) = if filled >= padding + galley.size().x + padding {
         (rect.left() + padding, egui::Color32::from_gray(24))
@@ -189,6 +192,37 @@ fn usage_bar(ui: &mut egui::Ui, used_pct: f64) {
     };
     let pos = egui::pos2(x, rect.center().y - galley.size().y / 2.0);
     ui.painter().with_clip_rect(rect).galley(pos, galley, color);
+
+    bar.on_hover_text(tr_args(
+        "overview.elapsed_hint",
+        &[
+            ("pct", &format!("{:.1}", w.expected_pct())),
+            ("elapsed", &timefmt::duration(w.elapsed_secs())),
+            ("total", &timefmt::duration(w.duration_secs)),
+        ],
+    ));
+}
+
+/// Where the window itself stands: three hours into five is a tick at 60 %.
+///
+/// The bar says how much of the limit is gone, which on its own answers
+/// nothing — 60 % spent is comfortable on the last day of a week and alarming
+/// on the first. Fill short of the tick means the spending is behind the clock,
+/// past it means ahead.
+fn elapsed_tick(ui: &egui::Ui, rect: egui::Rect, filled: f32, w: &WindowState) {
+    let at = rect.left() + rect.width() * w.elapsed_fraction() as f32;
+    // Every fill colour here is a light one and the bare track is dark, so a
+    // tick of a single colour would vanish on whichever side it landed.
+    let color = if at <= rect.left() + filled {
+        egui::Color32::from_gray(24)
+    } else {
+        ui.visuals().text_color()
+    };
+    ui.painter().with_clip_rect(rect).vline(
+        at.min(rect.right() - 1.0),
+        rect.y_range(),
+        egui::Stroke::new(2.0, color),
+    );
 }
 
 /// The "how much may I spend" card — the reason the pace is computed at all.
