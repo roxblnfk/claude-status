@@ -13,6 +13,12 @@ line in Claude Code's own status bar. The part worth having is the advice: it
 works out how much may still go today to land exactly on the weekly reset,
 rather than running dry on Thursday.
 
+| Overview | History |
+|:--:|:--:|
+| ![Both windows, the daily ration and the advice](resources/tab-1-en.png) | ![Limit usage over the week, sessions and tokens per day](resources/tab-2-en.png) |
+| **Models** | **Settings** |
+| ![All-time usage per model](resources/tab-3-en.png) | ![The status line template with a live preview](resources/tab-4-en.png) |
+
 ## Install
 
 Take the archive for your platform from the
