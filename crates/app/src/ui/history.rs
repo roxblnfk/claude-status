@@ -55,7 +55,7 @@ pub fn draw(ui: &mut egui::Ui, state: &mut AppState) {
 
     egui::ScrollArea::vertical().show(ui, |ui| {
         ui.strong(tr("history.limits.title"));
-        limits_plot(ui, &state.history);
+        limits_plot(ui, &state.history, state.scoped_model.as_deref());
 
         if let Some(stats) = &state.stats {
             ui.add_space(14.0);
@@ -70,7 +70,7 @@ pub fn draw(ui: &mut egui::Ui, state: &mut AppState) {
 }
 
 /// Limit percentages over the selected span.
-fn limits_plot(ui: &mut egui::Ui, history: &[Sample]) {
+fn limits_plot(ui: &mut egui::Ui, history: &[Sample], scoped_model: Option<&str>) {
     if history.is_empty() {
         empty_note(ui, LIMITS_HEIGHT);
         return;
@@ -91,11 +91,15 @@ fn limits_plot(ui: &mut egui::Ui, history: &[Sample]) {
     // series alone and would pull the tooltip off the shared instant.
     let moments: Vec<f64> = history.iter().map(|s| hours_since(origin, s.ts)).collect();
 
-    let series_names = [
-        tr("history.series.five_hour"),
-        tr("history.series.week"),
-        tr("history.series.week_opus"),
-    ];
+    // The per-model cap was Opus alone when the plot was written; it has not
+    // been for a while. The probe knows whose cap it is, so the legend says so
+    // — the same way the card on the overview does.
+    let scoped_name = match scoped_model {
+        Some(model) => tr_args("history.series.week_scoped", &[("model", model)]),
+        None => tr("history.series.week_opus"),
+    };
+    let series_names =
+        [tr("history.series.five_hour"), tr("history.series.week"), scoped_name];
     let all = [five, week, opus];
 
     // Lines go through the plot's own `label_formatter`, which renders a real

@@ -669,8 +669,11 @@ history:
       en: Week
       ru: Неделя
     week_opus:
-      en: Week Opus
-      ru: Неделя Opus
+      en: Week — per model
+      ru: Неделя — по модели
+    week_scoped:
+      en: "Week — %{model}"
+      ru: "Неделя — %{model}"
 
 models:
   missing_cache:
