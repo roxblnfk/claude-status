@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.1](https://github.com/roxblnfk/claude-status/compare/v1.4.0...v1.4.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* stop the tray menu from opening on a left click ([f4f3a23](https://github.com/roxblnfk/claude-status/commit/f4f3a23914bb1f75b8df62b3376e8f1a189f2d28))
+
+
+### Documentation
+
+* show the window in the readme ([06fa5d2](https://github.com/roxblnfk/claude-status/commit/06fa5d2ce6a1a1fb332604c872676c1bd6d5d99e))
+
 ## [1.4.0](https://github.com/roxblnfk/claude-status/compare/v1.3.1...v1.4.0) (2026-08-12)
 
 
