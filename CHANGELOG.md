@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.4.0](https://github.com/roxblnfk/claude-status/compare/v1.3.1...v1.4.0) (2026-08-12)
+
+
+### Features
+
+* mark how much of the window has passed on the usage bar ([b41ecea](https://github.com/roxblnfk/claude-status/commit/b41ecea87cb7fcee4de8a748233ecbc92e167edc))
+
+
+### Bug Fixes
+
+* name the model the weekly cap belongs to on the plot ([a8d9cc4](https://github.com/roxblnfk/claude-status/commit/a8d9cc41cd3a0336ea7185f3dc8eeb357cc632ab))
+* report a per-model cap that is not the tightest limit ([bcb15b6](https://github.com/roxblnfk/claude-status/commit/bcb15b6feaac9337adf016dbdb2d2fc83b2fc325))
+
 ## [1.3.1](https://github.com/roxblnfk/claude-status/compare/v1.3.0...v1.3.1) (2026-08-12)
 
 
