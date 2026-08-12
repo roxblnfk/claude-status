@@ -39,6 +39,23 @@ jobs:
           fetch-depth: 0
           ref: ${{ fromJson(steps.release.outputs.pr).headBranchName }}
 
+      # release-please raises the version in Cargo.toml through the annotation
+      # there and knows nothing about Cargo.lock, which pins the workspace
+      # crates by version as well. Left alone it trails a release behind, and
+      # then the first build on any machine rewrites it — a file that is always
+      # dirty and never committed. Cargo brings it in line itself; doing it in
+      # the release pull request keeps the two in step without a commit of its
+      # own on the default branch.
+      - name: Bring Cargo.lock to the released version
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        run: |
+          cargo update --workspace
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock
+          git diff --cached --quiet || git commit -m "chore: sync Cargo.lock with the release version"
+          git push
+
       - uses: roxblnfk/action-vibe-index@v1
         if: ${{ steps.release.outputs.prs_created == 'true' }}
         with:
