@@ -184,16 +184,26 @@ fn parse(line: &str) -> Result<Usage> {
         bail!(tr("probe.error.no_limits"));
     };
 
-    let scoped = limits
-        .limits
-        .iter()
-        .filter(|l| l.kind.as_deref() == Some("weekly_scoped"))
-        // Several models can be capped; the one in force is the one to show.
-        .find(|l| l.is_active.unwrap_or(false))
-        .and_then(|l| {
-            let name = l.scope.as_ref()?.model.as_ref()?.display_name.clone()?;
-            Some((name, window(l.percent, l.resets_at.as_deref())?))
-        });
+    // `is_active` marks the limit doing the constraining at this moment — the
+    // five-hour one, most of the time — not the model a cap belongs to. A
+    // scoped cap therefore sits at `false` while it applies in full: requiring
+    // the flag left the per-model figure frozen at whatever it read the last
+    // time that model happened to be the tightest limit.
+    //
+    // Several models can be capped at once, so the active one still comes
+    // first; with none marked, the fullest is the one that matters.
+    let mut scoped_caps: Vec<&Entry> =
+        limits.limits.iter().filter(|l| l.kind.as_deref() == Some("weekly_scoped")).collect();
+    scoped_caps.sort_by(|a, b| {
+        b.is_active
+            .unwrap_or(false)
+            .cmp(&a.is_active.unwrap_or(false))
+            .then(b.percent.unwrap_or(0.0).total_cmp(&a.percent.unwrap_or(0.0)))
+    });
+    let scoped = scoped_caps.iter().find_map(|l| {
+        let name = l.scope.as_ref()?.model.as_ref()?.display_name.clone()?;
+        Some((name, window(l.percent, l.resets_at.as_deref())?))
+    });
 
     Ok(Usage {
         five_hour: limits.five_hour.and_then(Raw::into_window),
@@ -303,10 +313,36 @@ mod tests {
         assert_eq!(scoped.used_pct, 79.0);
     }
 
+    /// `is_active` follows whichever limit is currently the tightest, and that
+    /// is the five-hour window nearly always, so an unmarked scoped cap is
+    /// still the reading to show: requiring the flag froze the per-model figure
+    /// at 6 % for two days while Claude Code was showing 25 %.
     #[test]
-    fn an_inactive_scoped_cap_is_not_taken() {
+    fn a_scoped_cap_counts_while_another_limit_is_the_active_one() {
         let quiet = ANSWER.replace(r#""is_active":true"#, r#""is_active":false"#);
-        assert!(parse(&quiet).unwrap().scoped.is_none());
+        let (model, scoped) = parse(&quiet).unwrap().scoped.expect("the cap still applies");
+        assert_eq!(model, "Fable");
+        assert_eq!(scoped.used_pct, 79.0);
+    }
+
+    /// Several models can be capped at once. The active one is the one in
+    /// force; with none marked there is nothing to go by but how full they are.
+    #[test]
+    fn among_several_scoped_caps_the_active_one_comes_first() {
+        let two = ANSWER.replace(
+            r#""is_active":true"#,
+            r#""is_active":false},
+               {"kind":"weekly_scoped","percent":12,"resets_at":"2026-08-10T15:00:00.386691+00:00",
+                "scope":{"model":{"id":null,"display_name":"Sonnet"}},"is_active":true"#,
+        );
+        let (model, scoped) = parse(&two).unwrap().scoped.unwrap();
+        assert_eq!(model, "Sonnet", "the fuller Fable cap is not the one in force");
+        assert_eq!(scoped.used_pct, 12.0);
+
+        let neither = two.replace(r#""is_active":true"#, r#""is_active":false"#);
+        let (model, scoped) = parse(&neither).unwrap().scoped.unwrap();
+        assert_eq!(model, "Fable", "with nothing active the fullest cap is shown");
+        assert_eq!(scoped.used_pct, 79.0);
     }
 
     #[test]
