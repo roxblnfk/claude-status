@@ -54,6 +54,12 @@ impl Tray {
         let tooltip = state.tooltip();
         let icon = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
+            // `tray-icon` opens the menu on either button by default, so a left
+            // click used to raise the menu and the window one after the other —
+            // the menu appearing only to be dismissed by the window covering
+            // it. The left click opens the window; the menu belongs to the
+            // right one.
+            .with_menu_on_left_click(false)
             .with_tooltip(&tooltip)
             .with_icon(to_icon(&icon::render(None, None))?)
             .build()
