@@ -61,6 +61,9 @@ pub struct Db {
     conn: Connection,
 }
 
+/// Marks that the one-off rounding of stored boundaries has run.
+const BOUNDARIES_ROUNDED: &str = "boundaries_rounded";
+
 impl Db {
     /// Opens the database in the application data directory, applying the schema.
     pub fn open_default() -> Result<Self> {
@@ -133,7 +136,30 @@ impl Db {
         if !self.has_column("samples", "scoped_model")? {
             self.conn.execute_batch("ALTER TABLE samples ADD COLUMN scoped_model TEXT;")?;
         }
+
+        // Rows written before [`boundary`] existed still hold the raw seconds,
+        // and one window scattered across three of them keeps reading wrong
+        // until they are brought onto the same grain. Once is enough — the flag
+        // is what keeps every later open from rewriting the whole table.
+        if self.meta_get(BOUNDARIES_ROUNDED)?.is_none() {
+            self.round_stored_boundaries()?;
+            self.meta_set(BOUNDARIES_ROUNDED, "1")?;
+        }
         Ok(())
+    }
+
+    /// Brings boundaries already on disk onto the minute [`boundary`] rounds to.
+    fn round_stored_boundaries(&self) -> Result<usize> {
+        Ok(self.conn.execute(
+            "UPDATE samples SET
+                 five_resets_at = (five_resets_at + 30) / 60 * 60,
+                 week_resets_at = (week_resets_at + 30) / 60 * 60,
+                 opus_resets_at = (opus_resets_at + 30) / 60 * 60
+             WHERE five_resets_at % 60 <> 0
+                OR week_resets_at % 60 <> 0
+                OR opus_resets_at % 60 <> 0",
+            [],
+        )?)
     }
 
     fn has_column(&self, table: &str, column: &str) -> Result<bool> {
@@ -161,11 +187,11 @@ impl Db {
         }
 
         let five_pct = five.and_then(|w| w.used_percentage);
-        let five_resets_at = five.and_then(|w| w.resets_at);
+        let five_resets_at = boundary(five.and_then(|w| w.resets_at));
         let week_pct = week.and_then(|w| w.used_percentage);
-        let week_resets_at = week.and_then(|w| w.resets_at);
+        let week_resets_at = boundary(week.and_then(|w| w.resets_at));
         let opus_pct = opus.and_then(|w| w.used_percentage);
-        let opus_resets_at = opus.and_then(|w| w.resets_at);
+        let opus_resets_at = boundary(opus.and_then(|w| w.resets_at));
 
         // Compared against this session's own previous sample, not the global
         // last one: with several Claude Code sessions running, their readings
@@ -218,12 +244,12 @@ impl Db {
         }
 
         let five_pct = usage.five_hour.map(|w| w.used_pct);
-        let five_resets_at = usage.five_hour.map(|w| w.resets_at);
+        let five_resets_at = boundary(usage.five_hour.map(|w| w.resets_at));
         let week_pct = usage.seven_day.map(|w| w.used_pct);
-        let week_resets_at = usage.seven_day.map(|w| w.resets_at);
+        let week_resets_at = boundary(usage.seven_day.map(|w| w.resets_at));
         let scoped_model = usage.scoped.as_ref().map(|(model, _)| model.clone());
         let opus_pct = usage.scoped.as_ref().map(|(_, w)| w.used_pct);
-        let opus_resets_at = usage.scoped.as_ref().map(|(_, w)| w.resets_at);
+        let opus_resets_at = boundary(usage.scoped.as_ref().map(|(_, w)| w.resets_at));
 
         if let Some(last) = self.latest_for_session(Some(crate::probe::SOURCE))?
             && same_state(&last, five_pct, five_resets_at, week_pct, week_resets_at, opus_pct)
@@ -595,6 +621,22 @@ fn row_to_sample(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sample> {
     })
 }
 
+/// Window boundaries are stored rounded to the minute.
+///
+/// The status line reports the reset as whole seconds and always the same ones,
+/// but the probe reads an RFC 3339 timestamp that Claude Code recomputes for
+/// every answer, so one and the same reset arrives as 18:59:59, 19:00:00 or
+/// 19:00:01. Stored verbatim, each variant reads as a window of its own:
+/// [`Db::current_sample`] follows the highest boundary and lands in whichever
+/// variant happens to be latest, blind to everything the other two hold — one
+/// stray second showed the week at 14 % while it stood at 27 %.
+///
+/// Real boundaries fall on ten-minute marks, so a minute is a grain no genuine
+/// reset can cross.
+fn boundary(resets_at: Option<i64>) -> Option<i64> {
+    resets_at.map(|ts| (ts + 30).div_euclid(60) * 60)
+}
+
 fn same_state(
     last: &Sample,
     five_pct: Option<f64>,
@@ -713,11 +755,59 @@ mod tests {
         let db = Db::open_in_memory().unwrap();
         // The previous window ended at 95 %; the new one has barely started.
         db.record(&session_input("s", 95.0, 90.0, 999), 100).unwrap();
-        db.record(&session_input("s", 2.0, 1.0, 5000), 200).unwrap();
+        db.record(&session_input("s", 2.0, 1.0, 5040), 200).unwrap();
 
         let current = db.current_sample().unwrap().unwrap();
         assert_eq!(current.five_pct, Some(2.0), "a reset window is not shadowed by the old peak");
-        assert_eq!(current.five_resets_at, Some(5000));
+        assert_eq!(current.five_resets_at, Some(5040));
+    }
+
+    fn probe_usage(week_pct: f64, resets_at: i64) -> crate::probe::Usage {
+        crate::probe::Usage {
+            seven_day: Some(crate::probe::Window { used_pct: week_pct, resets_at }),
+            ..Default::default()
+        }
+    }
+
+    /// The probe reads the reset off a timestamp Claude Code recomputes for
+    /// every answer, so the same boundary arrives a second either way. Kept
+    /// apart, the stray second reads as a window of its own, and being the
+    /// highest it becomes the current one — the week showed 12 % while it stood
+    /// at 27 %.
+    #[test]
+    fn a_reset_that_drifts_by_a_second_stays_one_window() {
+        let db = Db::open_in_memory().unwrap();
+        db.record_probe(&probe_usage(12.0, 1_786_978_801), 100).unwrap();
+        db.record_probe(&probe_usage(27.0, 1_786_978_799), 200).unwrap();
+
+        let current = db.current_sample().unwrap().unwrap();
+        assert_eq!(current.week_resets_at, Some(1_786_978_800));
+        assert_eq!(current.week_pct, Some(27.0), "the stray second must not shadow the window");
+    }
+
+    /// The same drift on rows written before the rounding existed: the
+    /// migration has to fold them back onto one boundary, or a database that
+    /// has already been collecting keeps reading wrong.
+    #[test]
+    fn boundaries_already_stored_are_rounded_once() {
+        let db = Db::open_in_memory().unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO samples (ts, last_seen_ts, week_pct, week_resets_at,
+                                      five_pct, five_resets_at)
+                 VALUES (100, 100, 27.0, 1786978799, 4.0, 1786552201)",
+                [],
+            )
+            .unwrap();
+
+        // Pretend the row predates the migration, then let it run again.
+        db.conn.execute("DELETE FROM meta WHERE key = ?1", params![BOUNDARIES_ROUNDED]).unwrap();
+        db.migrate().unwrap();
+
+        let stored = db.latest().unwrap().unwrap();
+        assert_eq!(stored.week_resets_at, Some(1_786_978_800));
+        assert_eq!(stored.five_resets_at, Some(1_786_552_200));
+        assert_eq!(db.round_stored_boundaries().unwrap(), 0, "nothing is left to round");
     }
 
     #[test]
@@ -788,8 +878,10 @@ mod tests {
         assert_eq!(bounds[1].ts, 300);
     }
 
-    /// A week that began at t=10_000, so the dates below sit inside it.
-    const WEEK_RESETS: i64 = SEVEN_DAY_SECS + 10_000;
+    /// A week that began at t=10_200, so the dates below sit inside it. The
+    /// offset is a whole number of minutes because that is the grain
+    /// boundaries are stored on.
+    const WEEK_RESETS: i64 = SEVEN_DAY_SECS + 10_200;
 
     #[test]
     fn baseline_is_the_level_recorded_before_midnight() {
@@ -816,10 +908,10 @@ mod tests {
     #[test]
     fn baseline_is_estimated_when_collecting_started_late() {
         let db = Db::open_in_memory().unwrap();
-        // The week began at 10_000, the first reading is at 50_000 and shows
+        // The week began at 10_200, the first reading is at 49_800 and shows
         // 40 %. Midnight at 30_000 is halfway through that stretch, so about
         // half of the 40 % is assumed to have been there already.
-        db.record(&input(10.0, 40.0, WEEK_RESETS), 50_000).unwrap();
+        db.record(&input(10.0, 40.0, WEEK_RESETS), 49_800).unwrap();
 
         let (pct, estimated) = db.week_baseline(WEEK_RESETS, 30_000).unwrap().unwrap();
         assert!((pct - 20.0).abs() < 1e-6, "{pct}");
