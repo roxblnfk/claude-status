@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/roxblnfk/claude-status/compare/v1.3.0...v1.3.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* fold a reset that drifts by a second into one window ([734c3b6](https://github.com/roxblnfk/claude-status/commit/734c3b61b0c927ecf64cea933e172e15f9805d20))
+
 ## [1.3.0](https://github.com/roxblnfk/claude-status/compare/v1.2.0...v1.3.0) (2026-08-10)
 
 
