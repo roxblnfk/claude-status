@@ -58,6 +58,9 @@ pub struct SettingsState {
     message: Option<Result<String, String>>,
     /// Whether the destructive reset is awaiting confirmation.
     confirming_reset: bool,
+    /// The same for recounting the logs from scratch, which is destructive in
+    /// its own way: days whose logs are gone cannot come back.
+    confirming_rescan: bool,
 }
 
 impl Default for SettingsState {
@@ -68,6 +71,7 @@ impl Default for SettingsState {
             refresh_interval: 60,
             message: None,
             confirming_reset: false,
+            confirming_rescan: false,
         }
     }
 }
@@ -96,7 +100,7 @@ pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut SettingsStat
             Page::Source => {
                 hook_section(ui, state, &mut ui_state.refresh_interval, &mut ui_state.message);
                 ui.add_space(12.0);
-                probe_section(ui, state);
+                probe_section(ui, state, &mut ui_state.confirming_rescan);
             }
             Page::Statusline => statusline_section(ui, state, template),
             Page::Program => {
@@ -126,7 +130,7 @@ pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut SettingsStat
                     });
                 }
                 if let Ok(path) = paths::config_path() {
-                    ui.label(egui::RichText::new(path.display().to_string()).weak().small());
+                    ui.label(egui::RichText::new(path.display().to_string()).weak());
                 }
             });
         }
@@ -158,16 +162,16 @@ fn hook_section(
         match &state.install {
             InstallStatus::Ours { command } => {
                 ui.colored_label(crate::ui::level_color(0.0), tr("settings.hook.state_ours"));
-                ui.label(egui::RichText::new(command).weak().small());
+                ui.label(egui::RichText::new(command).weak());
             }
             InstallStatus::Stale { command } => {
                 ui.colored_label(crate::ui::level_color(80.0), tr("settings.hook.state_stale"));
-                ui.label(egui::RichText::new(command).weak().small());
+                ui.label(egui::RichText::new(command).weak());
                 ui.label(tr("settings.hook.state_stale_note"));
             }
             InstallStatus::Foreign { command } => {
                 ui.colored_label(crate::ui::level_color(80.0), tr("settings.hook.state_foreign"));
-                ui.label(egui::RichText::new(command).weak().small());
+                ui.label(egui::RichText::new(command).weak());
                 ui.label(tr("settings.hook.state_foreign_note"));
             }
             InstallStatus::Absent => {
@@ -219,7 +223,7 @@ fn hook_section(
         });
 
         ui.add_space(4.0);
-        ui.label(egui::RichText::new(tr("settings.hook.applied_note")).weak().small());
+        ui.label(egui::RichText::new(tr("settings.hook.applied_note")).weak());
     });
 }
 
@@ -339,7 +343,7 @@ fn language_section(ui: &mut egui::Ui, state: &mut AppState) {
                 }
             }
         });
-        ui.label(egui::RichText::new(tr("settings.language.restart_note")).weak().small());
+        ui.label(egui::RichText::new(tr("settings.language.restart_note")).weak());
     });
 }
 
@@ -349,7 +353,7 @@ fn tray_section(ui: &mut egui::Ui, state: &mut AppState) {
         ui.strong(tr("settings.tray.title"));
         ui.add_space(4.0);
 
-        ui.label(egui::RichText::new(tr("settings.tray.icon_hint")).weak().small());
+        ui.label(egui::RichText::new(tr("settings.tray.icon_hint")).weak());
 
         ui.horizontal(|ui| {
             ui.label(tr("settings.tray.refresh"));
@@ -386,7 +390,7 @@ fn autostart_section(
             state.refresh();
         }
 
-        ui.label(egui::RichText::new(tr("settings.autostart.hint")).weak().small());
+        ui.label(egui::RichText::new(tr("settings.autostart.hint")).weak());
 
         if let autostart::State::Elsewhere { path } = &state.autostart {
             ui.add_space(4.0);
@@ -394,7 +398,7 @@ fn autostart_section(
                 crate::ui::level_color(80.0),
                 tr_args("settings.autostart.elsewhere", &[("path", path)]),
             );
-            ui.label(egui::RichText::new(tr("settings.autostart.elsewhere_fix")).weak().small());
+            ui.label(egui::RichText::new(tr("settings.autostart.elsewhere_fix")).weak());
         }
     });
 }
@@ -417,8 +421,7 @@ fn update_section(ui: &mut egui::Ui, state: &mut AppState) {
                 "settings.update.current",
                 &[("version", &update::Version::current().to_string())],
             ))
-            .weak()
-            .small(),
+            .weak(),
         );
         ui.add_space(4.0);
 
@@ -452,9 +455,9 @@ fn update_section(ui: &mut egui::Ui, state: &mut AppState) {
 
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(tr("settings.update.source")).weak().small());
+            ui.label(egui::RichText::new(tr("settings.update.source")).weak());
             ui.hyperlink_to(
-                egui::RichText::new(update::REPO).small(),
+                update::REPO,
                 format!("https://github.com/{}", update::REPO),
             );
         });
@@ -484,7 +487,7 @@ fn update_section(ui: &mut egui::Ui, state: &mut AppState) {
 
 /// Asking Claude Code directly — the source that also works where no status
 /// line is drawn.
-fn probe_section(ui: &mut egui::Ui, state: &mut AppState) {
+fn probe_section(ui: &mut egui::Ui, state: &mut AppState, confirming_rescan: &mut bool) {
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.strong(tr("settings.probe.title"));
@@ -505,7 +508,7 @@ fn probe_section(ui: &mut egui::Ui, state: &mut AppState) {
                         .suffix(""),
                 );
             });
-            ui.label(egui::RichText::new(tr("settings.probe.interval_hint")).weak().small());
+            ui.label(egui::RichText::new(tr("settings.probe.interval_hint")).weak());
         });
 
         ui.add_space(6.0);
@@ -525,6 +528,51 @@ fn probe_section(ui: &mut egui::Ui, state: &mut AppState) {
         });
 
         if let Some(message) = &state.probe_message {
+            ui.add_space(4.0);
+            match message {
+                Ok(text) => ui.colored_label(crate::ui::level_color(0.0), text),
+                Err(text) => ui.colored_label(crate::ui::level_color(100.0), text),
+            };
+        }
+
+        // The second source, and the one nothing else on this page mentions:
+        // tokens per model and project come from the session logs, counted
+        // daily. The button is for when a day is too long to wait.
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(6.0);
+        ui.strong(tr("settings.scan.title"));
+        ui.label(egui::RichText::new(tr("settings.scan.hint")).weak());
+        if let Ok(path) = paths::claude_projects() {
+            ui.label(egui::RichText::new(path.display().to_string()).weak());
+        }
+
+        ui.add_space(6.0);
+        let busy = state.scanning();
+        ui.horizontal(|ui| {
+            let label =
+                if busy { tr("models.scan.running") } else { tr("settings.scan.run_now") };
+            if ui.add_enabled(!busy, egui::Button::new(label)).clicked() {
+                state.start_scan();
+            }
+            if busy {
+                ui.spinner();
+            }
+            if state.last_scan_ts > 0 {
+                ui.label(
+                    egui::RichText::new(tr_args(
+                        "settings.scan.last",
+                        &[("time", &timefmt::datetime(state.last_scan_ts))],
+                    ))
+                    .weak(),
+                );
+            }
+        });
+
+        ui.add_space(4.0);
+        rescan_button(ui, state, confirming_rescan, busy);
+
+        if let Some(message) = &state.scan_message {
             ui.add_space(4.0);
             match message {
                 Ok(text) => ui.colored_label(crate::ui::level_color(0.0), text),
@@ -552,15 +600,44 @@ fn storage_section(
                     .range(0..=3650)
                     .suffix(tr("unit.days_suffix")),
             );
-            ui.label(egui::RichText::new(tr("settings.storage.retention_hint")).weak().small());
+            ui.label(egui::RichText::new(tr("settings.storage.retention_hint")).weak());
         });
 
         if let Ok(path) = paths::db_path() {
-            ui.label(egui::RichText::new(path.display().to_string()).weak().small());
+            ui.label(egui::RichText::new(path.display().to_string()).weak());
         }
 
         ui.add_space(8.0);
         reset_button(ui, state, confirming_reset, message);
+    });
+}
+
+/// Recounting from scratch, behind a confirmation.
+///
+/// Every ordinary scan already covers every log; this one additionally forgets
+/// what was counted before, which is the only way to lose a day whose log
+/// Claude Code has deleted since. Hence the question.
+fn rescan_button(ui: &mut egui::Ui, state: &mut AppState, confirming: &mut bool, busy: bool) {
+    if !*confirming {
+        if ui
+            .add_enabled(!busy, egui::Button::new(tr("settings.scan.recount")))
+            .on_hover_text(tr("settings.scan.recount_hint"))
+            .clicked()
+        {
+            *confirming = true;
+        }
+        return;
+    }
+
+    ui.horizontal(|ui| {
+        ui.colored_label(crate::ui::level_color(95.0), tr("settings.scan.recount_confirm"));
+        if ui.button(tr("settings.storage.reset_yes")).clicked() {
+            *confirming = false;
+            state.rescan_everything();
+        }
+        if ui.button(tr("settings.storage.reset_no")).clicked() {
+            *confirming = false;
+        }
     });
 }
 

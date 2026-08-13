@@ -5,29 +5,32 @@ use std::time::Duration;
 
 use anyhow::Result;
 use claude_status_core::{
-    Config, Db, Sample, autostart,
+    Config, Db, Sample, Totals, autostart, db,
     install::{self, InstallStatus},
     pace::Overview,
-    probe,
-    update,
+    probe, scan,
     stats_cache::StatsCache,
-    timefmt, tr, tr_args,
+    timefmt, tr, tr_args, update,
 };
 
-/// The span the history is shown over.
+/// How long a window of time is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Range {
     Day,
     Week,
     Month,
+    /// Everything counted so far. Has no length, so it cannot be stepped
+    /// through — there is nothing on either side of it.
+    All,
 }
 
 impl Range {
-    pub fn secs(self) -> i64 {
+    pub fn secs(self) -> Option<i64> {
         match self {
-            Range::Day => 86_400,
-            Range::Week => 7 * 86_400,
-            Range::Month => 30 * 86_400,
+            Range::Day => Some(86_400),
+            Range::Week => Some(7 * 86_400),
+            Range::Month => Some(30 * 86_400),
+            Range::All => None,
         }
     }
 
@@ -36,10 +39,64 @@ impl Range {
             Range::Day => tr("ui.range.day"),
             Range::Week => tr("ui.range.week"),
             Range::Month => tr("ui.range.month"),
+            Range::All => tr("ui.range.all"),
         }
     }
 
-    pub const ALL: [Range; 3] = [Range::Day, Range::Week, Range::Month];
+    pub const ALL: [Range; 4] = [Range::Day, Range::Week, Range::Month, Range::All];
+}
+
+/// The window a tab is looking at: a length, and how far back from now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Period {
+    pub range: Range,
+    /// 0 is the window ending now, 1 the one before it, and so on. Stepping
+    /// back is what makes last month reachable without a date picker.
+    pub back: i64,
+}
+
+impl Period {
+    pub fn new(range: Range) -> Self {
+        Self { range, back: 0 }
+    }
+
+    /// The window in unix seconds.
+    pub fn bounds(self, now: i64) -> (i64, i64) {
+        match self.range.secs() {
+            Some(secs) => (now - (self.back + 1) * secs, now - self.back * secs),
+            None => (0, now),
+        }
+    }
+
+    /// The same window as the day keys the aggregates are stored under.
+    pub fn days(self, now: i64) -> (String, String) {
+        if self.range == Range::All {
+            return (db::Span::ALL.from.to_string(), db::Span::ALL.to.to_string());
+        }
+        let (from, to) = self.bounds(now);
+        (timefmt::day_key(from), timefmt::day_key(to))
+    }
+
+    /// `13.07 — 13.08`, or the single date when the window is a day.
+    pub fn label(self, now: i64) -> String {
+        if self.range == Range::All {
+            return String::new();
+        }
+        let (from, to) = self.bounds(now);
+        if self.range == Range::Day {
+            return timefmt::date(to);
+        }
+        format!("{} — {}", timefmt::date(from), timefmt::date(to))
+    }
+
+    /// Whether stepping forward is possible: the newest window is now.
+    pub fn at_present(self) -> bool {
+        self.back == 0
+    }
+
+    pub fn steppable(self) -> bool {
+        self.range != Range::All
+    }
 }
 
 pub struct AppState {
@@ -47,8 +104,29 @@ pub struct AppState {
     pub overview: Overview,
     /// Samples over the selected span, oldest first.
     pub history: Vec<Sample>,
-    pub range: Range,
+    /// What the history tab is looking at — every plot on it, not just the
+    /// limits one.
+    pub period: Period,
+    /// What the models tab is looking at. Kept apart: one is for watching the
+    /// week go by, the other for adding up a month.
+    pub models_period: Period,
+    /// What Claude Code aggregated itself. Only the all-time counters are read
+    /// from it now — they reach back past the oldest session log still on disk.
     pub stats: Option<StatsCache>,
+    /// Tokens counted from the session logs: `(date, model, tokens)`.
+    pub tokens_per_day: Vec<(String, String, i64)>,
+    /// `(date, sessions, messages)` from the same source.
+    pub activity_per_day: Vec<(String, i64, i64)>,
+    /// All-time totals per model and per project, busiest first.
+    pub models: Vec<Totals>,
+    pub projects: Vec<Totals>,
+    /// The project the models table is narrowed to, picked from that list.
+    pub project: Option<String>,
+    /// Everything in the models window summed, for the subagent share.
+    pub usage_totals: Totals,
+    /// The first day the counted history covers, and when it was last counted.
+    pub counted_since: Option<String>,
+    pub last_scan_ts: i64,
     pub install: InstallStatus,
     /// Whether the session starts us, read from the operating system rather
     /// than mirrored in the configuration — a mirror would drift.
@@ -63,6 +141,11 @@ pub struct AppState {
     probe: Arc<Mutex<ProbeSlot>>,
     /// Outcome of the last probe, for the settings screen.
     pub probe_message: Option<Result<String, String>>,
+    /// Shared with the scan thread: counting hundreds of megabytes of logs
+    /// takes seconds, and the window has to keep drawing.
+    scan: Arc<Mutex<ScanSlot>>,
+    /// Outcome of the last scan, for the models screen.
+    pub scan_message: Option<Result<String, String>>,
     /// Shared with the update thread, for the same reason.
     update: Arc<Mutex<UpdateStage>>,
     /// Set by the settings screen, acted on by the paint loop: only that loop
@@ -91,14 +174,32 @@ struct ProbeSlot {
     outcome: Option<Result<String, String>>,
 }
 
+/// The scan thread's side of the same fence.
+#[derive(Default)]
+struct ScanSlot {
+    running: bool,
+    outcome: Option<Result<String, String>>,
+}
+
 impl AppState {
     pub fn load() -> Self {
         let mut state = Self {
             config: Config::load_and_apply_language(),
             overview: Overview::default(),
             history: Vec::new(),
-            range: Range::Week,
+            // A month either way: a week of daily bars is too few to see a
+            // shape in, and the limits plot holds a month of samples at most.
+            period: Period::new(Range::Month),
+            models_period: Period::new(Range::Month),
             stats: None,
+            tokens_per_day: Vec::new(),
+            activity_per_day: Vec::new(),
+            models: Vec::new(),
+            projects: Vec::new(),
+            project: None,
+            usage_totals: Totals::default(),
+            counted_since: None,
+            last_scan_ts: 0,
             install: InstallStatus::Absent,
             autostart: autostart::State::Off,
             error: None,
@@ -106,6 +207,8 @@ impl AppState {
             scoped_model: None,
             probe: Arc::new(Mutex::new(ProbeSlot::default())),
             probe_message: None,
+            scan: Arc::new(Mutex::new(ScanSlot::default())),
+            scan_message: None,
             update: Arc::new(Mutex::new(UpdateStage::Idle)),
             restart_requested: false,
         };
@@ -123,6 +226,7 @@ impl AppState {
         self.refreshed_at = now;
 
         self.collect_probe();
+        self.collect_scan();
         match self.reload(now) {
             Ok(()) => self.error = None,
             Err(e) => self.error = Some(format!("{e:#}")),
@@ -131,11 +235,15 @@ impl AppState {
         self.install = install::status().unwrap_or(InstallStatus::Absent);
         self.autostart = autostart::state().unwrap_or(autostart::State::Off);
         self.maybe_probe(now);
+        if scan::due(self.last_scan_ts, now) {
+            self.start_scan();
+        }
     }
 
     fn reload(&mut self, now: i64) -> Result<()> {
         let db = Db::open_default()?;
-        self.history = db.samples_between(now - self.range.secs(), now)?;
+        let (from, to) = self.period.bounds(now);
+        self.history = db.samples_between(from, to)?;
 
         // Deliberately not derived from `history`: the summary needs the peak
         // reading of each window and the bounds of the weekly one, neither of
@@ -143,7 +251,86 @@ impl AppState {
         self.overview = db.overview(now)?;
         self.stats = StatsCache::load().unwrap_or(None);
         self.scoped_model = db.scoped_model().unwrap_or(None);
+
+        // The daily plots and both tables come from the logs Claude Code
+        // writes, counted into this database — its own aggregates stopped
+        // being recomputed and stood a week stale with nothing saying so.
+        let (plot_from, plot_to) = self.period.days(now);
+        let plotted = db::Span::new(&plot_from, &plot_to);
+        self.tokens_per_day = db.tokens_per_day(plotted)?;
+        self.activity_per_day = db.activity_per_day(plotted)?;
+
+        let (table_from, table_to) = self.models_period.days(now);
+        let tabled = db::Span::new(&table_from, &table_to);
+        let project = self.project.as_deref();
+        self.models = db.totals_by_model(tabled, project)?;
+        self.projects = db.totals_by_project(tabled)?;
+        self.usage_totals = db.overall_totals(tabled, project)?;
+
+        self.counted_since = db.first_counted_day()?;
+        self.last_scan_ts = db.last_scan_ts()?;
         Ok(())
+    }
+
+    /// Picks up what the scan thread left behind.
+    fn collect_scan(&mut self) {
+        let Ok(mut slot) = self.scan.lock() else { return };
+        if let Some(outcome) = slot.outcome.take() {
+            self.scan_message = Some(outcome);
+        }
+    }
+
+    /// Throws away what was counted and counts it again from scratch.
+    ///
+    /// Every scan already reads every log — the incremental part only skips
+    /// files that have not moved. This is for when the stored numbers are in
+    /// doubt, and it costs the days whose logs Claude Code has since deleted.
+    pub fn rescan_everything(&mut self) {
+        if let Ok(db) = Db::open_default() {
+            let _ = db.forget_counted_usage();
+        }
+        self.start_scan();
+    }
+
+    /// Counts the session logs on a thread of its own.
+    ///
+    /// Runs itself once a day and on the button: the first pass reads every log
+    /// there is — 400 MB and half a minute on this machine — and later ones only
+    /// the tails that grew, which is under a second.
+    pub fn start_scan(&mut self) {
+        let Ok(mut slot) = self.scan.lock() else { return };
+        if slot.running {
+            return;
+        }
+        slot.running = true;
+        drop(slot);
+
+        let shared = Arc::clone(&self.scan);
+        std::thread::spawn(move || {
+            let outcome = scan_once();
+            if let Ok(mut slot) = shared.lock() {
+                slot.running = false;
+                slot.outcome = Some(outcome);
+            }
+        });
+    }
+
+    /// Narrows the models table to one project, or widens it back.
+    ///
+    /// Re-reads rather than filtering what is already loaded: the totals are a
+    /// `GROUP BY` away in the database, and a table of a dozen rows is not
+    /// worth keeping a second copy of in memory.
+    pub fn select_project(&mut self, project: Option<String>) {
+        if self.project == project {
+            return;
+        }
+        self.project = project;
+        self.refresh();
+    }
+
+    /// Whether a scan is running right now.
+    pub fn scanning(&self) -> bool {
+        self.scan.lock().is_ok_and(|slot| slot.running)
     }
 
     /// Picks up what the probe thread left behind.
@@ -313,6 +500,22 @@ fn probe_once() -> Result<String, String> {
     Ok(tr("probe.updated"))
 }
 
+/// Counts the session logs into the database, on the scan thread.
+fn scan_once() -> Result<String, String> {
+    let fail = |e: anyhow::Error| format!("{e:#}");
+
+    let mut db = Db::open_default().map_err(fail)?;
+    let report = scan::run(&mut db).map_err(fail)?;
+
+    Ok(tr_args(
+        "models.scan.done",
+        &[
+            ("messages", &report.messages.to_string()),
+            ("logs", &report.logs_read.to_string()),
+        ],
+    ))
+}
+
 /// Truncates at a character boundary rather than a byte one.
 fn truncate_chars(s: &str, max: usize) -> String {
     match s.char_indices().nth(max) {
@@ -345,8 +548,19 @@ mod tests {
             config: Config::default(),
             overview,
             history: Vec::new(),
-            range: Range::Week,
+            // A month either way: a week of daily bars is too few to see a
+            // shape in, and the limits plot holds a month of samples at most.
+            period: Period::new(Range::Month),
+            models_period: Period::new(Range::Month),
             stats: None,
+            tokens_per_day: Vec::new(),
+            activity_per_day: Vec::new(),
+            models: Vec::new(),
+            projects: Vec::new(),
+            project: None,
+            usage_totals: Totals::default(),
+            counted_since: None,
+            last_scan_ts: 0,
             install: InstallStatus::Absent,
             autostart: autostart::State::Off,
             error: None,
@@ -354,6 +568,8 @@ mod tests {
             scoped_model: None,
             probe: Arc::new(Mutex::new(ProbeSlot::default())),
             probe_message: None,
+            scan: Arc::new(Mutex::new(ScanSlot::default())),
+            scan_message: None,
             update: Arc::new(Mutex::new(UpdateStage::Idle)),
             restart_requested: false,
         }

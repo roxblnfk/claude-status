@@ -6,6 +6,7 @@
 use anyhow::{Result, bail};
 use claude_status_core::{
     Config, Db, autostart,
+    db::Span,
     install::{self, InstallStatus},
     paths, probe,
     render::{self, RenderContext},
@@ -28,6 +29,8 @@ pub enum Command {
     Preview { template: Option<String> },
     /// Ask Claude Code for the current limits and store the answer.
     Probe,
+    /// Count tokens from the session logs.
+    Scan,
     /// Read one status line payload from stdin. What Claude Code runs.
     Hook,
     /// Fetch a newer release from GitHub and put it in place.
@@ -49,6 +52,7 @@ pub fn parse(args: impl Iterator<Item = String>) -> Result<Command> {
         "status" => Ok(Command::Status),
         "preview" => Ok(Command::Preview { template: args.get(1).cloned() }),
         "probe" => Ok(Command::Probe),
+        "scan" => Ok(Command::Scan),
         install::HOOK_ARG => Ok(Command::Hook),
         "update" => Ok(Command::Update),
         other => bail!(
@@ -114,6 +118,7 @@ pub fn run(command: Command) -> Result<()> {
         Command::Status => status(),
         Command::Preview { template } => preview(template.as_deref()),
         Command::Probe => probe_once(),
+        Command::Scan => scan_now(),
         Command::Update => update_now(),
     }
 }
@@ -238,6 +243,47 @@ fn window_line(key: &str, w: &claude_status_core::WindowState) -> String {
             ("left", &timefmt::duration(w.remaining_secs())),
         ],
     )
+}
+
+/// Counts tokens from the session logs and prints what came of it.
+fn scan_now() -> Result<()> {
+    let mut db = Db::open_default()?;
+    let report = claude_status_core::scan::run(&mut db)?;
+
+    println!(
+        "{}",
+        tr_args(
+            "cli.scan.done",
+            &[
+                ("read", &report.logs_read.to_string()),
+                ("skipped", &report.logs_skipped.to_string()),
+                ("messages", &report.messages.to_string()),
+                ("parsed", &report.parsed.to_string()),
+                ("mb", &format!("{:.1}", report.bytes as f64 / 1_048_576.0)),
+            ]
+        )
+    );
+
+    println!("\n{}", tr("cli.scan.models"));
+    for model in db.totals_by_model(Span::ALL, None)? {
+        println!("  {:<32} {:>10}", model.name, tokens(model.total()));
+    }
+
+    println!("\n{}", tr("cli.scan.projects"));
+    for project in db.totals_by_project(Span::ALL)? {
+        println!("  {:<48} {:>10}", project.name, tokens(project.total()));
+    }
+    Ok(())
+}
+
+/// `12.3B`, `354.8M`, `8260` — the same shortening the window uses.
+fn tokens(n: i64) -> String {
+    match n {
+        n if n >= 1_000_000_000 => format!("{:.2}B", n as f64 / 1e9),
+        n if n >= 1_000_000 => format!("{:.1}M", n as f64 / 1e6),
+        n if n >= 1_000 => format!("{:.0}k", n as f64 / 1e3),
+        n => n.to_string(),
+    }
 }
 
 /// Asks Claude Code for the limits and stores what comes back.

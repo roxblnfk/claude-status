@@ -43,6 +43,15 @@ directly instead — which starts a short-lived Claude Code of its own, no more
 often than every 15 minutes. Both the interval and the whole thing can be turned
 off under **Settings → Data source**.
 
+Where the tokens went — by model, by project, and how much of it subagents
+spent — is counted from the session logs Claude Code writes: once a day by
+itself, on the button under **Settings → Data source**, or with `claude-status
+scan`. Only whole messages are counted, so a resumed session cannot inflate the
+total by repeating the history it continues.
+
+The period is picked on the History and Models tabs and stepped through with
+the arrows: last week, the month before last, or all of it, the same way.
+
 The status line template is edited in the window, with a live preview, ready
 presets and the list of placeholders.
 

@@ -1,11 +1,10 @@
-//! The "History" tab: limit usage over time plus the daily aggregates Claude
-//! Code keeps in `stats-cache.json`.
+//! The "History" tab: limit usage over time, plus what the session logs say
+//! was spent per day.
 
 use std::collections::BTreeMap;
 
 use claude_status_core::{
     Sample,
-    stats_cache::StatsCache,
     statusline::{FIVE_HOUR_SECS, SEVEN_DAY_SECS},
     timefmt, tr, tr_args,
 };
@@ -14,7 +13,7 @@ use egui_plot::{
     Bar, BarChart, Corner, HoverPosition, Legend, Line, Plot, PlotPoint, PlotPoints,
 };
 
-use crate::state::{AppState, Range};
+use crate::state::AppState;
 use crate::ui::human_tokens;
 
 /// Height of the limits plot.
@@ -23,8 +22,6 @@ const LIMITS_HEIGHT: f32 = 190.0;
 const DAILY_HEIGHT: f32 = 150.0;
 /// Height of the token plot: a stack of five models needs the room.
 const TOKENS_HEIGHT: f32 = DAILY_HEIGHT * 2.0;
-/// How many days of daily aggregates to show.
-const DAILY_DAYS: i64 = 30;
 /// How many models get their own colour before the rest are lumped together.
 const TOP_MODELS: usize = 5;
 
@@ -35,37 +32,33 @@ type Points = Vec<[f64; 2]>;
 type BarLabel = Box<dyn Fn(&Bar, &BarChart) -> String>;
 
 pub fn draw(ui: &mut egui::Ui, state: &mut AppState) {
-    ui.horizontal(|ui| {
-        ui.label(tr("history.period"));
-        for range in Range::ALL {
-            if ui.selectable_label(state.range == range, range.label()).clicked()
-                && state.range != range
-            {
-                state.range = range;
-                state.refresh();
-            }
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let text =
-                tr_args("history.sample_count", &[("count", &state.history.len().to_string())]);
-            ui.label(egui::RichText::new(text).weak());
-        });
-    });
+    let now = timefmt::now();
+    let mut period = state.period;
+    let changed = crate::ui::period_picker(ui, &mut period, now);
+    if changed {
+        state.period = period;
+        state.refresh();
+    }
     ui.add_space(6.0);
 
     egui::ScrollArea::vertical().show(ui, |ui| {
-        ui.strong(tr("history.limits.title"));
+        ui.horizontal(|ui| {
+            ui.strong(tr("history.limits.title"));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let text =
+                    tr_args("history.sample_count", &[("count", &state.history.len().to_string())]);
+                ui.label(egui::RichText::new(text).weak());
+            });
+        });
         limits_plot(ui, &state.history, state.scoped_model.as_deref());
 
-        if let Some(stats) = &state.stats {
-            ui.add_space(14.0);
-            ui.strong(tr_args("history.sessions.title", &[("days", &DAILY_DAYS.to_string())]));
-            sessions_plot(ui, stats);
+        ui.add_space(14.0);
+        ui.strong(tr("history.sessions.title"));
+        sessions_plot(ui, &state.activity_per_day);
 
-            ui.add_space(14.0);
-            ui.strong(tr_args("history.tokens.title", &[("days", &DAILY_DAYS.to_string())]));
-            tokens_plot(ui, stats);
-        }
+        ui.add_space(14.0);
+        ui.strong(tr("history.tokens.title"));
+        tokens_plot(ui, &state.tokens_per_day);
     });
 }
 
@@ -166,12 +159,14 @@ fn nearest_moment(moments: &[f64], x: f64) -> Option<f64> {
     moments.iter().copied().min_by(|a, b| (a - x).abs().total_cmp(&(b - x).abs()))
 }
 
-/// Sessions started per day.
-fn sessions_plot(ui: &mut egui::Ui, stats: &StatsCache) {
+/// Sessions active per day.
+fn sessions_plot(ui: &mut egui::Ui, activity: &[(String, i64, i64)]) {
     let days: Vec<(i64, f64)> = recent_days(
-        stats.daily_activity.iter().filter_map(|d| {
-            timefmt::parse_day_key(&d.date).map(|day| (day, d.session_count as f64))
-        }),
+        activity
+            .iter()
+            .filter_map(|(date, sessions, _)| {
+                timefmt::parse_day_key(date).map(|day| (day, *sessions as f64))
+            }),
     );
 
     if days.is_empty() {
@@ -205,14 +200,14 @@ fn sessions_plot(ui: &mut egui::Ui, stats: &StatsCache) {
 }
 
 /// Tokens per day, stacked by model.
-fn tokens_plot(ui: &mut egui::Ui, stats: &StatsCache) {
-    let per_day = tokens_by_day_and_model(stats);
+fn tokens_plot(ui: &mut egui::Ui, rows: &[(String, String, i64)]) {
+    let per_day = tokens_by_day_and_model(rows);
     if per_day.is_empty() {
         empty_note(ui, DAILY_HEIGHT);
         return;
     }
 
-    let models = top_models(stats);
+    let models = top_models(rows);
     let totals: Vec<(i64, f64)> = per_day
         .iter()
         .map(|(day, day_models)| {
@@ -470,43 +465,38 @@ fn y_ceiling(values: impl Iterator<Item = f64>) -> f64 {
     if peak > 0.0 { peak * 1.1 } else { 1.0 }
 }
 
-/// Keeps the last [`DAILY_DAYS`] entries, in chronological order.
+/// In chronological order. The window is chosen before the query now, so
+/// everything handed here belongs on the plot.
 fn recent_days(entries: impl Iterator<Item = (i64, f64)>) -> Vec<(i64, f64)> {
     let mut days: Vec<(i64, f64)> = entries.collect();
     days.sort_by_key(|(day, _)| *day);
-    if days.len() > DAILY_DAYS as usize {
-        days.drain(..days.len() - DAILY_DAYS as usize);
-    }
     days
 }
 
 /// Tokens per day per model over the recent window.
-fn tokens_by_day_and_model(stats: &StatsCache) -> Vec<(i64, BTreeMap<&str, i64>)> {
-    let mut days: Vec<(i64, BTreeMap<&str, i64>)> = stats
-        .daily_model_tokens
-        .iter()
-        .filter_map(|d| {
-            let day = timefmt::parse_day_key(&d.date)?;
-            let models = d.tokens_by_model.iter().map(|(m, t)| (m.as_str(), *t)).collect();
-            Some((day, models))
-        })
-        .collect();
-
-    days.sort_by_key(|(day, _)| *day);
-    if days.len() > DAILY_DAYS as usize {
-        days.drain(..days.len() - DAILY_DAYS as usize);
+fn tokens_by_day_and_model(rows: &[(String, String, i64)]) -> Vec<(i64, BTreeMap<&str, i64>)> {
+    let mut days: BTreeMap<i64, BTreeMap<&str, i64>> = BTreeMap::new();
+    for (date, model, tokens) in rows {
+        let Some(day) = timefmt::parse_day_key(date) else { continue };
+        *days.entry(day).or_default().entry(model.as_str()).or_default() += tokens;
     }
-    days
+
+    days.into_iter().collect()
 }
 
 /// The models worth their own colour, busiest first.
-fn top_models(stats: &StatsCache) -> Vec<String> {
-    stats
-        .models_by_usage()
-        .into_iter()
-        .take(TOP_MODELS)
-        .map(|(name, _)| name.to_string())
-        .collect()
+///
+/// Ranked within the window on screen rather than over all time: a legend that
+/// named models absent from the plot would be answering another question.
+fn top_models(rows: &[(String, String, i64)]) -> Vec<String> {
+    let mut totals: BTreeMap<&str, i64> = BTreeMap::new();
+    for (_, model, tokens) in rows {
+        *totals.entry(model.as_str()).or_default() += tokens;
+    }
+
+    let mut ranked: Vec<(&str, i64)> = totals.into_iter().collect();
+    ranked.sort_by_key(|(_, tokens)| std::cmp::Reverse(*tokens));
+    ranked.into_iter().take(TOP_MODELS).map(|(model, _)| model.to_string()).collect()
 }
 
 /// Drops the vendor prefix: `claude-opus-4-8` reads better as `opus-4-8` in a
@@ -713,21 +703,28 @@ mod tests {
         assert_eq!(text, format!("{}\nopus-5\n100", timefmt::format_day_number(7)));
     }
 
+    /// The window is chosen before the query, so nothing is dropped here — but
+    /// the rows arrive grouped by date, and a plot needs them in order.
     #[test]
-    fn recent_days_keeps_the_tail_in_order() {
-        let entries = (0..40).map(|d| (39 - d, d as f64));
-        let days = recent_days(entries);
+    fn recent_days_sorts_without_dropping() {
+        let days = recent_days((0..40).map(|d| (39 - d, d as f64)));
 
-        assert_eq!(days.len(), DAILY_DAYS as usize);
-        assert_eq!(days.first().unwrap().0, 10, "the oldest days are dropped");
+        assert_eq!(days.len(), 40);
+        assert_eq!(days.first().unwrap().0, 0);
         assert_eq!(days.last().unwrap().0, 39);
         assert!(days.windows(2).all(|w| w[0].0 < w[1].0), "sorted by day");
     }
 
+    /// The legend names what is on the plot: the busiest models of the window
+    /// shown, not of all time.
     #[test]
-    fn recent_days_passes_short_input_through() {
-        let days = recent_days([(5, 1.0), (3, 2.0)].into_iter());
-        assert_eq!(days, vec![(3, 2.0), (5, 1.0)]);
+    fn top_models_rank_within_the_window() {
+        let rows = vec![
+            ("2026-08-01".to_string(), "quiet".to_string(), 5),
+            ("2026-08-01".to_string(), "busy".to_string(), 100),
+            ("2026-08-02".to_string(), "quiet".to_string(), 1),
+        ];
+        assert_eq!(top_models(&rows), vec!["busy".to_string(), "quiet".to_string()]);
     }
 
     #[test]

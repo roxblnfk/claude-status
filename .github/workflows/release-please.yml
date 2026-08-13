@@ -32,7 +32,7 @@ jobs:
       # Checking the pull request branch out is what puts the commit there —
       # the action pushes to whatever HEAD points at.
       - uses: actions/checkout@v4
-        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        if: ${{ steps.release.outputs.pr }}
         with:
           # The score is read from the commit history; a shallow clone would
           # score whatever slice of it the runner happened to fetch.
@@ -46,8 +46,13 @@ jobs:
       # dirty and never committed. Cargo brings it in line itself; doing it in
       # the release pull request keeps the two in step without a commit of its
       # own on the default branch.
+      # Every push that lands on the pull request, not just the one that opened
+      # it: 1.4.0 raised the version in a pull request that already existed, so
+      # a step gated on `prs_created` never ran and the lock stayed behind
+      # again. Nothing is committed when the file is already in step, so the
+      # wider condition costs nothing.
       - name: Bring Cargo.lock to the released version
-        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        if: ${{ steps.release.outputs.pr }}
         run: |
           cargo update --workspace
           git config user.name "github-actions[bot]"

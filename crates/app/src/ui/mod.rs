@@ -1,6 +1,6 @@
 //! The statistics window.
 
-mod history;
+pub mod history;
 mod models;
 mod overview;
 mod settings;
@@ -8,7 +8,7 @@ mod settings;
 use claude_status_core::{timefmt, tr, tr_args};
 use eframe::egui;
 
-use crate::state::AppState;
+use crate::state::{AppState, Period, Range};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -36,6 +36,8 @@ impl Tab {
 pub struct UiState {
     pub tab: Option<Tab>,
     pub settings: settings::SettingsState,
+    /// Which breakdown the models tab is showing.
+    pub breakdown: models::Breakdown,
 }
 
 impl UiState {
@@ -83,12 +85,61 @@ pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut UiState) -> 
     egui::CentralPanel::default().show(ui, |ui| match active {
         Tab::Overview => goto = overview::draw(ui, state),
         Tab::History => history::draw(ui, state),
-        Tab::Models => models::draw(ui, state),
+        Tab::Models => models::draw(ui, state, &mut ui_state.breakdown),
         Tab::Settings => settings::draw(ui, state, &mut ui_state.settings),
     });
 
     ui_state.tab = Some(goto.unwrap_or(active));
     refresh_requested
+}
+
+/// Picks the window a tab looks at: the lengths, then a way through them.
+///
+/// Returns `true` when the choice changed and the data has to be re-read. The
+/// arrows are what make a length useful for anything but the present — a month
+/// that only ever ends today cannot answer what last month cost.
+pub fn period_picker(ui: &mut egui::Ui, period: &mut Period, now: i64) -> bool {
+    let mut changed = false;
+
+    ui.horizontal(|ui| {
+        ui.label(tr("history.period"));
+        for range in Range::ALL {
+            if ui.selectable_label(period.range == range, range.label()).clicked()
+                && period.range != range
+            {
+                // The step is measured in windows, so keeping it across a
+                // change of length would land somewhere arbitrary — six days
+                // back becomes six months back.
+                *period = Period::new(range);
+                changed = true;
+            }
+        }
+
+        if !period.steppable() {
+            return;
+        }
+
+        ui.add_space(8.0);
+        if ui.small_button("◀").on_hover_text(tr("history.period_back")).clicked() {
+            period.back += 1;
+            changed = true;
+        }
+        let forward = ui
+            .add_enabled(!period.at_present(), egui::Button::new("▶").small())
+            .on_hover_text(tr("history.period_forward"));
+        if forward.clicked() {
+            period.back -= 1;
+            changed = true;
+        }
+
+        ui.label(egui::RichText::new(period.label(now)).weak());
+        if !period.at_present() && ui.small_button(tr("history.period_now")).clicked() {
+            period.back = 0;
+            changed = true;
+        }
+    });
+
+    changed
 }
 
 /// Colour by window fill — the same language the tray icon speaks.

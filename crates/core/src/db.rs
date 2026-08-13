@@ -4,6 +4,7 @@
 //! Hence WAL and a `busy_timeout`: several processes work with the database at
 //! the same time.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -43,6 +44,62 @@ impl Sample {
     /// The last moment this reading was known to still hold.
     pub fn seen_until(&self) -> i64 {
         self.last_seen_ts.max(self.ts)
+    }
+}
+
+/// Inclusive range of local days the aggregates are queried over, `YYYY-MM-DD`.
+///
+/// Dates are stored as text, and `YYYY-MM-DD` compares the same way as a date,
+/// so a range needs no conversion on either side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Span<'a> {
+    pub from: &'a str,
+    pub to: &'a str,
+}
+
+impl<'a> Span<'a> {
+    pub fn new(from: &'a str, to: &'a str) -> Self {
+        Self { from, to }
+    }
+
+    /// Everything ever counted. The bounds sit outside any real date rather
+    /// than being absent, which keeps one query where two would otherwise be.
+    pub const ALL: Span<'static> = Span { from: "0000-00-00", to: "9999-99-99" };
+}
+
+/// Usage summed over one grouping — a model, or a project.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Totals {
+    /// Whatever the rows were grouped by.
+    pub name: String,
+    pub messages: i64,
+    pub input: i64,
+    pub output: i64,
+    pub cache_read: i64,
+    pub cache_write: i64,
+    /// The part of the total that subagents spent.
+    pub agent_tokens: i64,
+}
+
+impl Totals {
+    /// Cache traffic counts: it is what the context costs to carry, and on a
+    /// long session it dwarfs everything typed.
+    pub fn total(&self) -> i64 {
+        self.input + self.output + self.cache_read + self.cache_write
+    }
+
+    pub fn cache(&self) -> i64 {
+        self.cache_read + self.cache_write
+    }
+
+    /// How much of it went to subagents, 0..100. A dispatched agent reads and
+    /// writes on a budget of its own, and that can be most of what a session
+    /// spends without anything on screen saying so.
+    pub fn agent_share(&self) -> f64 {
+        match self.total() {
+            0 => 0.0,
+            total => self.agent_tokens as f64 / total as f64 * 100.0,
+        }
     }
 }
 
@@ -116,12 +173,51 @@ impl Db {
             );
             CREATE INDEX IF NOT EXISTS idx_samples_ts ON samples(ts);
 
-            -- Mirror of ~/.claude/stats-cache.json: tokens per day and model.
-            CREATE TABLE IF NOT EXISTS daily_tokens (
-                date   TEXT NOT NULL,
-                model  TEXT NOT NULL,
-                tokens INTEGER NOT NULL,
-                PRIMARY KEY (date, model)
+            -- Assistant messages already counted, by the id the API gave them.
+            -- Resuming a session copies the history into a log of its own, so
+            -- the same message comes back under a new file — in one project
+            -- 2829 messages carried 1368 distinct ids. Counting per id rather
+            -- than per line is what keeps the totals honest, and it makes a
+            -- scan idempotent: re-reading a log adds nothing.
+            CREATE TABLE IF NOT EXISTS counted_messages (
+                id TEXT PRIMARY KEY
+            );
+
+            -- Token usage aggregated as it is read. The project comes from the
+            -- `cwd` in the log, so it reads as a path rather than as the
+            -- mangled directory name Claude Code files sessions under.
+            -- `agent` splits what a dispatched subagent spent from what the
+            -- session itself did: it is a dimension rather than a column of its
+            -- own so that the share can be asked for over any slice — a day, a
+            -- project, one model.
+            CREATE TABLE IF NOT EXISTS usage_by_day (
+                date        TEXT NOT NULL,
+                project     TEXT NOT NULL,
+                model       TEXT NOT NULL,
+                agent       INTEGER NOT NULL,
+                messages    INTEGER NOT NULL,
+                input       INTEGER NOT NULL,
+                output      INTEGER NOT NULL,
+                cache_read  INTEGER NOT NULL,
+                cache_write INTEGER NOT NULL,
+                PRIMARY KEY (date, project, model, agent)
+            );
+
+            -- Which days a session log was active on, for the sessions-per-day
+            -- count. A session spanning midnight belongs to both days.
+            CREATE TABLE IF NOT EXISTS session_days (
+                path TEXT NOT NULL,
+                date TEXT NOT NULL,
+                PRIMARY KEY (path, date)
+            );
+
+            -- How far each log has been read. Logs are append-only, so the
+            -- next scan starts where the last one stopped instead of parsing
+            -- hundreds of megabytes again.
+            CREATE TABLE IF NOT EXISTS scanned_logs (
+                path   TEXT PRIMARY KEY,
+                offset INTEGER NOT NULL,
+                mtime  INTEGER NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS meta (
@@ -135,6 +231,28 @@ impl Db {
         // scoped to; `IF NOT EXISTS` has no counterpart for columns.
         if !self.has_column("samples", "scoped_model")? {
             self.conn.execute_batch("ALTER TABLE samples ADD COLUMN scoped_model TEXT;")?;
+        }
+
+        // A mirror of `stats-cache.json` that the plots once read. Counting the
+        // logs replaced it; the empty table is left over in every database that
+        // has been through an earlier version.
+        self.conn.execute_batch("DROP TABLE IF EXISTS daily_tokens;")?;
+
+        // `agent` joined the key of `usage_by_day` after the table shipped, and
+        // a key cannot be widened in place. Everything in these four tables can
+        // be read again from the logs, so the cheapest correct answer is to
+        // drop them together and let the next scan refill them — half a minute,
+        // once. Dropping `counted_messages` along with them is what makes that
+        // work: left behind, it would call every message a repeat.
+        if self.has_column("usage_by_day", "date")? && !self.has_column("usage_by_day", "agent")? {
+            self.conn.execute_batch(
+                "DROP TABLE usage_by_day;
+                 DROP TABLE IF EXISTS counted_messages;
+                 DROP TABLE IF EXISTS session_days;
+                 DROP TABLE IF EXISTS scanned_logs;",
+            )?;
+            self.meta_set("last_scan_ts", "0")?;
+            return self.migrate();
         }
 
         // Rows written before [`boundary`] existed still hold the raw seconds,
@@ -279,6 +397,15 @@ impl Db {
             ],
         )?;
         Ok(Written::Inserted)
+    }
+
+    /// When the session logs were last counted, unix seconds.
+    pub fn last_scan_ts(&self) -> Result<i64> {
+        Ok(self.meta_get("last_scan_ts")?.and_then(|v| v.parse().ok()).unwrap_or(0))
+    }
+
+    pub fn set_last_scan_ts(&self, now: i64) -> Result<()> {
+        self.meta_set("last_scan_ts", &now.to_string())
     }
 
     /// When the last probe ran, unix seconds.
@@ -503,36 +630,194 @@ impl Db {
         Ok(overview)
     }
 
-    /// Stores the daily token breakdown per model (from `stats-cache.json`).
-    pub fn upsert_daily_tokens(&mut self, entries: &[(String, String, i64)]) -> Result<usize> {
-        let tx = self.conn.transaction()?;
-        {
-            let mut stmt = tx.prepare(
-                "INSERT INTO daily_tokens (date, model, tokens) VALUES (?1, ?2, ?3)
-                 ON CONFLICT(date, model) DO UPDATE SET tokens = excluded.tokens",
-            )?;
-            for (date, model, tokens) in entries {
-                stmt.execute(params![date, model, tokens])?;
-            }
-        }
-        tx.commit()?;
-        Ok(entries.len())
+    /// How far every session log has been read: path → (offset, mtime).
+    ///
+    /// Taken in one query rather than per file: the answer decides which of a
+    /// few hundred logs are worth opening at all, and a query each would cost
+    /// more than reading the ones that changed.
+    pub fn scan_progress(&self) -> Result<HashMap<String, (i64, i64)>> {
+        let mut stmt = self.conn.prepare("SELECT path, offset, mtime FROM scanned_logs")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, (r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)))
+        })?;
+        Ok(rows.collect::<Result<HashMap<_, _>, _>>()?)
     }
 
-    /// Daily tokens per model from `from` onwards (inclusive, `YYYY-MM-DD`).
-    pub fn daily_tokens_since(&self, from: &str) -> Result<Vec<(String, String, i64)>> {
+    /// Stores what one session log yielded. Returns the messages actually
+    /// counted — the ones not seen in some other log before.
+    pub fn record_log_scan(
+        &mut self,
+        path: &str,
+        offset: i64,
+        mtime: i64,
+        messages: &[crate::scan::Message],
+    ) -> Result<usize> {
+        let mut counted = 0;
+        let tx = self.conn.transaction()?;
+        {
+            let mut seen =
+                tx.prepare("INSERT OR IGNORE INTO counted_messages (id) VALUES (?1)")?;
+            let mut aggregate = tx.prepare(
+                "INSERT INTO usage_by_day
+                     (date, project, model, agent,
+                      messages, input, output, cache_read, cache_write)
+                 VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(date, project, model, agent) DO UPDATE SET
+                     messages    = messages + 1,
+                     input       = input + excluded.input,
+                     output      = output + excluded.output,
+                     cache_read  = cache_read + excluded.cache_read,
+                     cache_write = cache_write + excluded.cache_write",
+            )?;
+            // Only days that brought something new. A resumed session carries a
+            // copy of the history it continues, and counting its days would add
+            // that session to every day it merely quotes.
+            let mut active =
+                tx.prepare("INSERT OR IGNORE INTO session_days (path, date) VALUES (?1, ?2)")?;
+
+            for m in messages {
+                if seen.execute(params![m.id])? == 0 {
+                    continue;
+                }
+                aggregate.execute(params![
+                    m.date,
+                    m.project,
+                    m.model,
+                    m.agent,
+                    m.input,
+                    m.output,
+                    m.cache_read,
+                    m.cache_write
+                ])?;
+                active.execute(params![path, m.date])?;
+                counted += 1;
+            }
+
+            tx.execute(
+                "INSERT INTO scanned_logs (path, offset, mtime) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(path) DO UPDATE SET offset = excluded.offset, mtime = excluded.mtime",
+                params![path, offset, mtime],
+            )?;
+        }
+        tx.commit()?;
+        Ok(counted)
+    }
+
+    /// Tokens per day and model within `span`, inclusive.
+    pub fn tokens_per_day(&self, span: Span<'_>) -> Result<Vec<(String, String, i64)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT date, model, tokens FROM daily_tokens WHERE date >= ?1 ORDER BY date, model",
+            "SELECT date, model, SUM(input + output + cache_read + cache_write)
+             FROM usage_by_day WHERE date >= ?1 AND date <= ?2
+             GROUP BY date, model ORDER BY date, model",
         )?;
-        let rows = stmt.query_map(params![from], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        let rows = stmt
+            .query_map(params![span.from, span.to], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Sessions and messages per day within `span`.
+    pub fn activity_per_day(&self, span: Span<'_>) -> Result<Vec<(String, i64, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT d.date,
+                    (SELECT COUNT(*) FROM session_days s WHERE s.date = d.date),
+                    SUM(d.messages)
+             FROM usage_by_day d WHERE d.date >= ?1 AND d.date <= ?2
+             GROUP BY d.date ORDER BY d.date",
+        )?;
+        let rows = stmt
+            .query_map(params![span.from, span.to], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Totals per model over `span`, busiest first. `project` narrows to one.
+    pub fn totals_by_model(&self, span: Span<'_>, project: Option<&str>) -> Result<Vec<Totals>> {
+        self.totals("model", span, project)
+    }
+
+    /// Totals per project over `span`, busiest first.
+    pub fn totals_by_project(&self, span: Span<'_>) -> Result<Vec<Totals>> {
+        self.totals("project", span, None)
+    }
+
+    fn totals(&self, column: &str, span: Span<'_>, project: Option<&str>) -> Result<Vec<Totals>> {
+        // `?3 IS NULL OR project = ?3` rather than two statements: the filter is
+        // the only difference between them, and SQLite plans it the same way.
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {column}, SUM(messages), SUM(input), SUM(output),
+                    SUM(cache_read), SUM(cache_write),
+                    SUM(CASE WHEN agent THEN input + output + cache_read + cache_write
+                             ELSE 0 END)
+             FROM usage_by_day
+             WHERE date >= ?1 AND date <= ?2 AND (?3 IS NULL OR project = ?3)
+             GROUP BY {column}
+             ORDER BY SUM(input + output + cache_read + cache_write) DESC"
+        ))?;
+        let rows = stmt.query_map(params![span.from, span.to, project], |r| {
+            Ok(Totals {
+                name: r.get(0)?,
+                messages: r.get(1)?,
+                input: r.get(2)?,
+                output: r.get(3)?,
+                cache_read: r.get(4)?,
+                cache_write: r.get(5)?,
+                agent_tokens: r.get(6)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// One row summing everything in `span`, for the share subagents took.
+    pub fn overall_totals(&self, span: Span<'_>, project: Option<&str>) -> Result<Totals> {
+        let mut stmt = self.conn.prepare(
+            "SELECT SUM(messages), SUM(input), SUM(output), SUM(cache_read), SUM(cache_write),
+                    SUM(CASE WHEN agent THEN input + output + cache_read + cache_write
+                             ELSE 0 END)
+             FROM usage_by_day
+             WHERE date >= ?1 AND date <= ?2 AND (?3 IS NULL OR project = ?3)",
+        )?;
+        let totals = stmt.query_row(params![span.from, span.to, project], |r| {
+            Ok(Totals {
+                name: String::new(),
+                messages: r.get::<_, Option<i64>>(0)?.unwrap_or(0),
+                input: r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                output: r.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                cache_read: r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+                cache_write: r.get::<_, Option<i64>>(4)?.unwrap_or(0),
+                agent_tokens: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
+            })
+        })?;
+        Ok(totals)
+    }
+
+    /// Forgets everything counted, so the next scan reads every log afresh.
+    ///
+    /// The counted figures are not merely a cache: a day whose log Claude Code
+    /// has since deleted lives here and nowhere else, and this drops it. Worth
+    /// it only when the count itself is in doubt.
+    pub fn forget_counted_usage(&self) -> Result<()> {
+        self.conn.execute_batch(
+            "DELETE FROM usage_by_day;
+             DELETE FROM counted_messages;
+             DELETE FROM session_days;
+             DELETE FROM scanned_logs;",
+        )?;
+        self.set_last_scan_ts(0)
+    }
+
+    /// The day the counted history starts, if anything has been counted.
+    pub fn first_counted_day(&self) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row("SELECT MIN(date) FROM usage_by_day", [], |r| r.get(0))
+            .optional()?
+            .flatten())
     }
 
     /// Wipes the collected history.
     ///
-    /// Only the samples we gathered ourselves: `daily_tokens` mirrors
-    /// `stats-cache.json` and would come straight back, and `meta` holds
-    /// bookkeeping rather than statistics.
+    /// Only the samples we gathered ourselves. The counted usage stays: the
+    /// logs it came from are Claude Code's to delete, and once they are gone
+    /// nothing could bring those figures back.
     pub fn clear_samples(&self) -> Result<usize> {
         Ok(self.conn.execute("DELETE FROM samples", [])?)
     }
@@ -712,14 +997,181 @@ mod tests {
         assert!(db.latest().unwrap().is_none());
     }
 
-    #[test]
-    fn daily_tokens_roundtrip_and_upsert() {
-        let mut db = Db::open_in_memory().unwrap();
-        db.upsert_daily_tokens(&[("2026-08-01".into(), "claude-opus-5".into(), 100)]).unwrap();
-        db.upsert_daily_tokens(&[("2026-08-01".into(), "claude-opus-5".into(), 250)]).unwrap();
+    fn message(id: &str, date: &str, project: &str, input: i64) -> crate::scan::Message {
+        crate::scan::Message {
+            id: id.into(),
+            project: project.into(),
+            date: date.into(),
+            model: "claude-opus-5".into(),
+            agent: false,
+            input,
+            output: 1,
+            cache_read: 10,
+            cache_write: 2,
+        }
+    }
 
-        let rows = db.daily_tokens_since("2026-08-01").unwrap();
-        assert_eq!(rows, vec![("2026-08-01".into(), "claude-opus-5".into(), 250)]);
+    fn by_agent(id: &str, date: &str, project: &str, input: i64) -> crate::scan::Message {
+        crate::scan::Message { agent: true, ..message(id, date, project, input) }
+    }
+
+    /// Resuming a session copies the history it continues into a log of its
+    /// own, so the same ids arrive twice. Counting them twice would roughly
+    /// double every figure the window shows.
+    #[test]
+    fn a_message_counted_once_is_never_counted_again() {
+        let mut db = Db::open_in_memory().unwrap();
+        let first = [message("m1", "2026-08-01", "demo", 100), message("m2", "2026-08-01", "demo", 5)];
+        assert_eq!(db.record_log_scan("a.jsonl", 500, 7, &first).unwrap(), 2);
+
+        // The resumed log repeats m2 and brings one message of its own.
+        let second = [message("m2", "2026-08-01", "demo", 5), message("m3", "2026-08-02", "demo", 7)];
+        assert_eq!(db.record_log_scan("b.jsonl", 900, 8, &second).unwrap(), 1, "only the new one");
+
+        let totals = db.totals_by_model(Span::ALL, None).unwrap();
+        assert_eq!(totals.len(), 1);
+        assert_eq!(totals[0].messages, 3);
+        assert_eq!(totals[0].input, 112, "the repeat added nothing");
+        assert_eq!(totals[0].total(), 112 + 3 + 30 + 6);
+    }
+
+    /// What a dispatched subagent spends is the session's spending too, but it
+    /// is worth telling apart: on some projects it is most of the bill.
+    #[test]
+    fn subagent_usage_is_counted_apart_from_the_session() {
+        let mut db = Db::open_in_memory().unwrap();
+        db.record_log_scan(
+            "a.jsonl",
+            1,
+            1,
+            &[message("m1", "2026-08-01", "demo", 100), by_agent("m2", "2026-08-01", "demo", 300)],
+        )
+        .unwrap();
+
+        let overall = db.overall_totals(Span::ALL, None).unwrap();
+        assert_eq!(overall.input, 400, "both sides are in the total");
+        assert_eq!(overall.agent_tokens, 300 + 1 + 10 + 2);
+        // 313 of the 426 tokens counted are the agent's.
+        assert!((overall.agent_share() - 73.5).abs() < 0.1, "{}", overall.agent_share());
+
+        // The split survives grouping: the model row carries it as well.
+        let per_model = db.totals_by_model(Span::ALL, None).unwrap();
+        assert_eq!(per_model[0].agent_tokens, overall.agent_tokens);
+    }
+
+    /// Re-reading a log from the start — what happens when one is truncated or
+    /// rewritten — has to be harmless.
+    #[test]
+    fn rescanning_the_same_log_changes_nothing() {
+        let mut db = Db::open_in_memory().unwrap();
+        let messages = [message("m1", "2026-08-01", "demo", 100)];
+        db.record_log_scan("a.jsonl", 500, 7, &messages).unwrap();
+        assert_eq!(db.record_log_scan("a.jsonl", 500, 9, &messages).unwrap(), 0);
+
+        assert_eq!(db.totals_by_model(Span::ALL, None).unwrap()[0].input, 100);
+    }
+
+    #[test]
+    fn usage_is_grouped_by_day_project_and_model() {
+        let mut db = Db::open_in_memory().unwrap();
+        db.record_log_scan(
+            "a.jsonl",
+            10,
+            1,
+            &[
+                message("m1", "2026-08-01", "alpha", 100),
+                message("m2", "2026-08-01", "beta", 50),
+                message("m3", "2026-08-02", "alpha", 7),
+            ],
+        )
+        .unwrap();
+
+        let per_day = db.tokens_per_day(Span::new("2026-08-01", "2026-08-31")).unwrap();
+        assert_eq!(per_day.len(), 2, "one row per day, both projects summed");
+        assert_eq!(per_day[0].2, 100 + 50 + 2 * (1 + 10 + 2));
+
+        let projects = db.totals_by_project(Span::ALL).unwrap();
+        assert_eq!(projects[0].name, "alpha", "the busier project comes first");
+        assert_eq!(projects[0].input, 107);
+        assert_eq!(projects[1].name, "beta");
+
+        let within = db.totals_by_model(Span::ALL, Some("beta")).unwrap();
+        assert_eq!(within.len(), 1);
+        assert_eq!(within[0].input, 50);
+    }
+
+    /// Sessions are counted by the logs that brought something new that day, so
+    /// a resumed log does not add itself to every day it merely quotes.
+    #[test]
+    fn activity_counts_sessions_and_messages_per_day() {
+        let mut db = Db::open_in_memory().unwrap();
+        db.record_log_scan("a.jsonl", 1, 1, &[message("m1", "2026-08-01", "demo", 1)]).unwrap();
+        db.record_log_scan(
+            "b.jsonl",
+            1,
+            1,
+            &[message("m1", "2026-08-01", "demo", 1), message("m2", "2026-08-01", "demo", 1)],
+        )
+        .unwrap();
+
+        let activity = db.activity_per_day(Span::new("2026-08-01", "2026-08-31")).unwrap();
+        assert_eq!(activity, vec![("2026-08-01".to_string(), 2, 2)]);
+    }
+
+    /// Samples expire — a percentage from last month says nothing. The counted
+    /// usage must not: Claude Code deletes its own logs, so pruning what was
+    /// read out of them would destroy the only remaining copy.
+    #[test]
+    fn pruning_samples_leaves_the_counted_usage_alone() {
+        let mut db = Db::open_in_memory().unwrap();
+        db.record(&input(10.0, 20.0, 999), 100).unwrap();
+        db.record_log_scan("a.jsonl", 10, 1, &[message("m1", "2020-01-01", "demo", 100)]).unwrap();
+
+        assert_eq!(db.prune(1_000).unwrap(), 1, "the old sample goes");
+        assert_eq!(db.totals_by_model(Span::ALL, None).unwrap()[0].input, 100, "the count stays");
+        assert_eq!(db.first_counted_day().unwrap().as_deref(), Some("2020-01-01"));
+    }
+
+    /// A database from the version where `usage_by_day` had no `agent` column.
+    /// The key cannot be widened in place, so the counted tables are dropped
+    /// and the next scan refills them — what must survive is everything else.
+    #[test]
+    fn a_database_without_the_agent_column_is_rebuilt() {
+        let db = Db::open_in_memory().unwrap();
+        db.record(&input(10.0, 20.0, 999), 100).unwrap();
+        db.meta_set("last_prune_ts", "42").unwrap();
+        db.conn
+            .execute_batch(
+                "DROP TABLE usage_by_day;
+                 CREATE TABLE usage_by_day (
+                     date TEXT NOT NULL, project TEXT NOT NULL, model TEXT NOT NULL,
+                     messages INTEGER NOT NULL, input INTEGER NOT NULL, output INTEGER NOT NULL,
+                     cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
+                     PRIMARY KEY (date, project, model));
+                 INSERT INTO usage_by_day VALUES ('2026-08-01', 'demo', 'opus', 1, 5, 1, 1, 1);
+                 INSERT INTO counted_messages (id) VALUES ('m1');",
+            )
+            .unwrap();
+
+        db.migrate().unwrap();
+
+        assert!(db.has_column("usage_by_day", "agent").unwrap());
+        assert!(db.totals_by_model(Span::ALL, None).unwrap().is_empty(), "the counts are dropped");
+        assert_eq!(db.last_scan_ts().unwrap(), 0, "so the next scan reads every log again");
+        assert_eq!(db.samples_between(0, 200).unwrap().len(), 1, "samples are untouched");
+        assert_eq!(db.meta_get("last_prune_ts").unwrap().as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn scan_progress_remembers_where_each_log_stopped() {
+        let mut db = Db::open_in_memory().unwrap();
+        db.record_log_scan("a.jsonl", 500, 7, &[]).unwrap();
+        db.record_log_scan("a.jsonl", 900, 8, &[]).unwrap();
+        db.record_log_scan("b.jsonl", 4, 1, &[]).unwrap();
+
+        let progress = db.scan_progress().unwrap();
+        assert_eq!(progress.get("a.jsonl"), Some(&(900, 8)));
+        assert_eq!(progress.get("b.jsonl"), Some(&(4, 1)));
     }
 
     /// Builds a sample as reported by a specific session.
@@ -992,16 +1444,16 @@ mod tests {
     /// leaves every other piece of state alone, including the bookkeeping that
     /// nothing else would restore.
     #[test]
-    fn clear_wipes_samples_but_keeps_the_token_mirror() {
+    fn clear_wipes_samples_but_keeps_the_counted_usage() {
         let mut db = Db::open_in_memory().unwrap();
         db.record(&input(10.0, 20.0, 999), 100).unwrap();
-        db.upsert_daily_tokens(&[("2026-08-01".into(), "claude-opus-5".into(), 100)]).unwrap();
+        db.record_log_scan("a.jsonl", 10, 1, &[message("m1", "2026-08-01", "demo", 100)]).unwrap();
         db.meta_set("last_prune_ts", "42").unwrap();
 
         assert_eq!(db.clear_samples().unwrap(), 1);
         assert!(db.latest().unwrap().is_none());
         assert!(db.current_sample().unwrap().is_none());
-        assert_eq!(db.daily_tokens_since("2026-01-01").unwrap().len(), 1, "mirror survives");
+        assert_eq!(db.totals_by_model(Span::ALL, None).unwrap().len(), 1, "counted usage survives");
         assert_eq!(db.meta_get("last_prune_ts").unwrap().as_deref(), Some("42"), "meta survives");
     }
 

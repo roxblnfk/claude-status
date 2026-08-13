@@ -18,13 +18,14 @@ pub mod pace;
 pub mod paths;
 pub mod probe;
 pub mod render;
+pub mod scan;
 pub mod stats_cache;
 pub mod statusline;
 pub mod timefmt;
 pub mod update;
 
 pub use config::Config;
-pub use db::{Db, Sample, Written};
+pub use db::{Db, Sample, Totals, Written};
 pub use i18n::Language;
 pub use pace::{Overview, WindowState};
 pub use statusline::StatuslineInput;

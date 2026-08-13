@@ -198,6 +198,7 @@ cli:
         claude-status status                show the registration state and the latest sample
         claude-status preview [template]    print the status line
         claude-status probe                 ask Claude Code for the limits and store them
+        claude-status scan                  count tokens from the session logs
         claude-status update                fetch a newer release from GitHub, if any
         claude-status hook                  read one status line payload from stdin
                                             (what Claude Code runs; not for hand use)
@@ -226,6 +227,7 @@ cli:
         claude-status status                показать состояние прописки и последний снимок
         claude-status preview [шаблон]      напечатать статусную строку
         claude-status probe                 спросить лимиты у Claude Code и сохранить
+        claude-status scan                  посчитать токены по логам сессий
         claude-status update                скачать с GitHub новую версию, если она есть
         claude-status hook                  прочитать одну порцию данных со stdin
                                             (это запускает Claude Code, руками не нужно)
@@ -269,6 +271,22 @@ cli:
   uninstalled:
     en: The hook has been removed from the Claude Code settings.
     ru: Хук убран из настроек Claude Code.
+  scan:
+    done:
+      en: >-
+        Logs read: %{read}, unchanged: %{skipped}, %{mb} MB parsed. Counted
+        %{messages} messages out of %{parsed} found — the rest were copies a
+        resumed session brought along.
+      ru: >-
+        Прочитано логов: %{read}, без изменений: %{skipped}, разобрано %{mb} МБ.
+        Учтено сообщений: %{messages} из %{parsed} найденных — остальное копии,
+        принесённые продолженными сессиями.
+    models:
+      en: "Tokens per model:"
+      ru: "Токены по моделям:"
+    projects:
+      en: "Tokens per project:"
+      ru: "Токены по проектам:"
   status:
     ours:
       en: "Hook:  registered (%{command})"
@@ -447,6 +465,9 @@ ui:
     month:
       en: Month
       ru: Месяц
+    all:
+      en: All
+      ru: Всё
 
 overview:
   empty:
@@ -651,18 +672,27 @@ history:
       ru: Расход лимитов
   sessions:
     title:
-      en: Sessions per day, last %{days} days
-      ru: Сессий в день, последние %{days} дней
+      en: Sessions per day
+      ru: Сессий в день
     series:
       en: Sessions
       ru: Сессии
   tokens:
     title:
-      en: Tokens per day by model, last %{days} days
-      ru: Токены в день по моделям, последние %{days} дней
+      en: Tokens per day by model
+      ru: Токены в день по моделям
   period:
     en: "Period:"
     ru: "Период:"
+  period_back:
+    en: The window before this one
+    ru: Предыдущий период
+  period_forward:
+    en: The window after this one
+    ru: Следующий период
+  period_now:
+    en: now
+    ru: сейчас
   sample_count:
     en: "%{count} records"
     ru: "записей: %{count}"
@@ -684,38 +714,96 @@ history:
       ru: "Неделя — %{model}"
 
 models:
-  missing_cache:
-    en: Claude Code has not written its usage statistics yet.
-    ru: Claude Code ещё не записал статистику использования.
+  empty:
+    en: The session logs have not been counted yet.
+    ru: Логи сессий ещё не посчитаны.
   totals:
     sessions:
       en: Sessions total
       ru: Сессий всего
-    messages:
-      en: Messages total
-      ru: Сообщений всего
     first_session:
       en: First session
       ru: Первая сессия
-    computed:
-      en: Aggregates computed
-      ru: Агрегаты посчитаны
+    agents:
+      en: Subagents
+      ru: Субагенты
+    agents_hint:
+      en: >-
+        How much of the shown period a dispatched agent spent. It reads and
+        writes on a budget of its own, and on a project driven through agents
+        that is most of the bill.
+      ru: >-
+        Сколько из показанного периода потратили запущенные агенты. Они читают и
+        пишут на собственный счёт, и на проекте, который ведётся через агентов,
+        это большая часть расхода.
+    agents_value:
+      en: "%{pct}% — %{tokens} of %{total}"
+      ru: "%{pct}% — %{tokens} из %{total}"
+    counted_since:
+      en: Counted from
+      ru: Учтено с
+    counted_since_hint:
+      en: >-
+        The figures below are counted from the session logs. Claude Code deletes
+        old ones, so the history starts where the oldest log still on disk does —
+        and grows from here, because what has been counted stays counted.
+      ru: >-
+        Цифры ниже посчитаны по логам сессий. Claude Code удаляет старые, поэтому
+        история начинается с самого раннего сохранившегося лога — и дальше только
+        растёт: посчитанное остаётся посчитанным.
+    last_scan:
+      en: Last counted
+      ru: Последний подсчёт
+    never:
+      en: never
+      ru: ещё не было
+  scan:
+    button:
+      en: Recount
+      ru: Пересчитать
+    running:
+      en: Counting…
+      ru: Считаю…
+    done:
+      en: "Counted %{messages} new messages from %{logs} logs."
+      ru: "Учтено новых сообщений: %{messages} из %{logs} логов."
   table:
     title:
-      en: All-time usage per model
-      ru: Расход по моделям за всё время
-    model:
-      en: Model
-      ru: Модель
+      en: Where the tokens went
+      ru: Куда ушли токены
+    by_model:
+      en: By model
+      ru: По моделям
+    by_project:
+      en: By project
+      ru: По проектам
+    in_project:
+      en: "in %{project}"
+      ru: "в проекте %{project}"
+    all_projects:
+      en: all projects
+      ru: все проекты
+    open_project:
+      en: Show what this project spent, per model
+      ru: Показать расход этого проекта по моделям
+    name:
+      en: Name
+      ru: Название
+    messages:
+      en: "%{count} messages"
+      ru: "сообщений: %{count}"
     share:
       en: Share
       ru: Доля
     total:
       en: Total
       ru: Всего
-    input:
-      en: Input
-      ru: Вход
+    agents:
+      en: Agents
+      ru: Агенты
+    agents_hint:
+      en: "%{tokens} of it spent by subagents"
+      ru: "из них %{tokens} потратили субагенты"
     output:
       en: Output
       ru: Выход
@@ -933,6 +1021,40 @@ settings:
     running:
       en: Asking…
       ru: Спрашиваю…
+  scan:
+    title:
+      en: Counting the session logs
+      ru: Подсчёт по логам сессий
+    hint:
+      en: >-
+        Tokens per model and per project are counted from the logs Claude Code
+        writes for every session. It happens once a day on its own; only the
+        parts of a log that grew since last time are read.
+      ru: >-
+        Токены по моделям и проектам считаются по логам, которые Claude Code
+        пишет для каждой сессии. Это происходит раз в сутки само; читается лишь
+        то, что дописалось с прошлого раза.
+    run_now:
+      en: Count now
+      ru: Пересчитать сейчас
+    last:
+      en: "last counted %{time}"
+      ru: "последний подсчёт %{time}"
+    recount:
+      en: Count again from scratch
+      ru: Пересчитать всё заново
+    recount_hint:
+      en: >-
+        Every count already reads every log; this one first forgets what was
+        counted before. Days whose logs Claude Code has deleted since will be
+        lost — they exist nowhere else.
+      ru: >-
+        Обычный подсчёт и так читает все логи; этот сначала забывает всё, что
+        было учтено. Дни, логи которых Claude Code успел удалить, пропадут —
+        больше их взять неоткуда.
+    recount_confirm:
+      en: Forget what was counted and read every log again?
+      ru: Забыть посчитанное и прочитать все логи заново?
   language:
     title:
       en: Language

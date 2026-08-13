@@ -45,6 +45,34 @@ sources for literal `tr(...)` keys and asks for each one.
 **The data directory on Windows is `%APPDATA%` (roaming), not
 `%LOCALAPPDATA%`** — `dirs::data_dir()`.
 
+**Per-model and per-project tokens are counted here, not read.**
+`~/.claude/stats-cache.json` carries the same numbers already aggregated, and
+the plots used to take them — until Claude Code stopped recomputing the file
+(it stood at `lastComputedDate: 2026-08-05` for a week while sessions ran) and
+the window showed a flat line with nothing saying why. `crate::scan` reads
+`~/.claude/projects/**/*.jsonl` instead. Only the lifetime counters still come
+from the cache: they reach back past the oldest log on disk.
+
+**A resumed session copies the history it continues into a new log.** In one
+project 2829 assistant messages carried 1368 distinct `message.id`. Counting
+lines instead of ids roughly doubles every figure — that is the likely reason
+Claude Code's own daily totals run about twice ours. `counted_messages` is what
+prevents it, and it also makes a scan idempotent: re-reading a log, in whole or
+in part, adds nothing. Sizes are on `scanned_logs`, so only tails are parsed —
+399 MB and half a minute the first time, under a second after.
+
+**Subagent logs live one level deeper** (`<project>/<session>/subagents/`) and
+on a working machine outnumbered the top-level ones two to one. A walk that
+stops at the first level misses most of the tokens. Where the log sits is the
+only thing that says a subagent spent it, so `usage_by_day` carries `agent` in
+its key — a dimension, not a column, which is what lets the share be asked for
+over any slice. Sonnet turned out to be 95 % subagent work and Opus 9 %.
+
+**A project is the repository above the `cwd`, not the `cwd`.** Claude Code
+files a session by the directory it started in, so sessions begun in
+subdirectories split one checkout across a dozen entries — 44 "projects" where
+there were 16. `scan::project_of` walks up to the `.git`.
+
 **Samples are noisy by nature.** Several Claude Code sessions write at once, and
 an idle one keeps repeating what it last saw. Within one window (same
 `resets_at`) usage only ever grows, so the current value is the running maximum,
