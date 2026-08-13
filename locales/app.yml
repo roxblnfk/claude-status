@@ -31,6 +31,13 @@ error:
   not_an_object:
     en: "%{path} does not contain a JSON object"
     ru: "%{path} содержит не JSON-объект"
+  not_an_object_key:
+    en: >-
+      the "%{key}" setting in settings.json holds something other than an
+      object — leaving it alone rather than replacing it
+    ru: >-
+      настройка «%{key}» в settings.json содержит не объект — оставляем как
+      есть, чтобы не затереть её
   backup:
     en: could not save a backup to %{path}
     ru: не удалось сохранить резервную копию в %{path}
@@ -199,6 +206,10 @@ cli:
         claude-status preview [template]    print the status line
         claude-status probe                 ask Claude Code for the limits and store them
         claude-status scan                  count tokens from the session logs
+        claude-status models                show which models Claude Code is pinned to
+        claude-status models set SLOT MODEL point a slot at a model
+        claude-status models clear SLOT|--all
+                                            remove an override, or all of them
         claude-status update                fetch a newer release from GitHub, if any
         claude-status hook                  read one status line payload from stdin
                                             (what Claude Code runs; not for hand use)
@@ -207,6 +218,16 @@ cli:
       install options:
         --interval N   re-run the command every N seconds (default 60)
         --force        replace a third-party statusLine command, preserving it
+
+      models slots:
+        default        the model a session starts on (settings.json "model")
+        opus           what the opus alias resolves to
+        sonnet         what the sonnet alias resolves to
+        haiku          what the haiku alias resolves to
+        subagent       what subagents run on
+      A model is anything Claude Code accepts: an alias (opus), an id
+      (claude-opus-4-8), either with a [1m] suffix for the 1M-token context.
+      Nothing is verified here — Claude Code alone knows what your plan may run.
 
       Environment variables:
         CLAUDE_CONFIG_DIR    Claude Code directory instead of ~/.claude
@@ -228,6 +249,10 @@ cli:
         claude-status preview [шаблон]      напечатать статусную строку
         claude-status probe                 спросить лимиты у Claude Code и сохранить
         claude-status scan                  посчитать токены по логам сессий
+        claude-status models                показать, на каких моделях закреплён Claude Code
+        claude-status models set СЛОТ МОДЕЛЬ направить слот на модель
+        claude-status models clear СЛОТ|--all
+                                            убрать переопределение или все сразу
         claude-status update                скачать с GitHub новую версию, если она есть
         claude-status hook                  прочитать одну порцию данных со stdin
                                             (это запускает Claude Code, руками не нужно)
@@ -236,6 +261,16 @@ cli:
       Ключи install:
         --interval N   перезапускать команду каждые N секунд (по умолчанию 60)
         --force        заменить чужую команду statusLine, сохранив её
+
+      Слоты models:
+        default        модель, с которой начинается сессия (ключ "model")
+        opus           во что разворачивается алиас opus
+        sonnet         во что разворачивается алиас sonnet
+        haiku          во что разворачивается алиас haiku
+        subagent       на чём работают сабагенты
+      Модель — это любое имя, которое принимает Claude Code: алиас (opus), id
+      (claude-opus-4-8), с суффиксом [1m] для миллионного контекста. Здесь
+      ничего не проверяется — что доступно подписке, знает только Claude Code.
 
       Переменные окружения:
         CLAUDE_CONFIG_DIR    каталог Claude Code вместо ~/.claude
@@ -268,6 +303,31 @@ cli:
   restart_notice:
     en: Restart the Claude Code session for the hook to take effect.
     ru: Перезапустите сессию Claude Code, чтобы хук заработал.
+  models:
+    header:
+      en: "Model overrides in %{path}:"
+      ru: "Переопределения моделей в %{path}:"
+    row:
+      en: "  %{label} (%{key}) = %{value}"
+      ru: "  %{label} (%{key}) = %{value}"
+    warnings:
+      en: "Warnings:"
+      ru: "Предупреждения:"
+    set_done:
+      en: "%{label} → %{value}"
+      ru: "%{label} → %{value}"
+    cleared_slot:
+      en: "%{label}: cleared"
+      ru: "%{label}: убрано"
+    unknown_slot:
+      en: "unknown slot: %{slot} (expected one of: %{slots})"
+      ru: "неизвестный слот: %{slot} (ожидался один из: %{slots})"
+    set_usage:
+      en: "models set requires a slot and a model: claude-status models set opus claude-opus-4-8"
+      ru: "models set требует слот и модель: claude-status models set opus claude-opus-4-8"
+    clear_usage:
+      en: "models clear requires a slot or --all (expected one of: %{slots})"
+      ru: "models clear требует слот или --all (ожидался один из: %{slots})"
   uninstalled:
     en: The hook has been removed from the Claude Code settings.
     ru: Хук убран из настроек Claude Code.
@@ -816,6 +876,9 @@ settings:
     source:
       en: Data source
       ru: Источник данных
+    models:
+      en: Models
+      ru: Модели
     statusline:
       en: Status line
       ru: Статусная строка
@@ -883,6 +946,170 @@ settings:
     removed:
       en: The hook has been removed from the Claude Code settings
       ru: Хук убран из настроек Claude Code
+  models:
+    title:
+      en: Which models Claude Code uses
+      ru: Какие модели использует Claude Code
+    explanation:
+      en: >-
+        `opus`, `sonnet` and `haiku` are aliases, and Claude Code decides for
+        itself which release each one means — a new one arrives and your sessions
+        move onto it. Point an alias at a particular release to stay where you
+        are: `/model opus` keeps working and lands on what you chose here.
+      ru: >-
+        `opus`, `sonnet` и `haiku` — это алиасы, и Claude Code сам решает, какой
+        релиз стоит за каждым: выходит новый — сессии переезжают на него.
+        Направьте алиас на конкретный релиз, чтобы остаться там, где вам удобно:
+        `/model opus` продолжит работать и приведёт туда, что выбрано здесь.
+    slot:
+      default:
+        en: Session model
+        ru: Модель сессии
+      opus:
+        en: The `opus` alias
+        ru: Алиас `opus`
+      sonnet:
+        en: The `sonnet` alias
+        ru: Алиас `sonnet`
+      haiku:
+        en: The `haiku` alias
+        ru: Алиас `haiku`
+      subagent:
+        en: Subagents
+        ru: Сабагенты
+    hint:
+      default:
+        en: What a session starts on, until `/model` changes it.
+        ru: С чего начинается сессия, пока её не переключили через `/model`.
+      opus:
+        en: Which release `opus` and `opusplan` resolve to.
+        ru: В какой релиз разворачиваются `opus` и `opusplan`.
+      sonnet:
+        en: Which release `sonnet` resolves to.
+        ru: В какой релиз разворачивается `sonnet`.
+      haiku:
+        en: >-
+          Which release `haiku` resolves to. Claude Code also uses it for its own
+          background work.
+        ru: >-
+          В какой релиз разворачивается `haiku`. Claude Code использует его и для
+          своей фоновой работы.
+      subagent:
+        en: What subagents run on, whatever the session itself uses.
+        ru: На чём работают сабагенты, независимо от модели самой сессии.
+    unset:
+      en: not set
+      ru: не задано
+    pick:
+      en: from the list…
+      ru: из списка…
+    writes_key:
+      en: "writes %{key}"
+      ru: "пишет %{key}"
+    on_disk:
+      en: "in the file: %{value}"
+      ru: "в файле: %{value}"
+    pending:
+      # Covers both directions: an edit that has not been applied, and a file
+      # that changed under a window nobody has touched.
+      en: Not applied yet — the file holds something else.
+      ru: Ещё не применено — в файле другое.
+    nothing_set:
+      en: Nothing is overridden — Claude Code picks the models itself.
+      ru: Ничего не переопределено — модели выбирает сам Claude Code.
+    suffix_note:
+      en: >-
+        Any name Claude Code accepts will do, so the list is a shortcut rather
+        than a limit. Adding `[1m]` asks for the 1M-token context of a model that
+        has one — `claude-opus-5[1m]`.
+      ru: >-
+        Подойдёт любое имя, которое принимает Claude Code, — список лишь
+        подсказка, а не ограничение. Суффикс `[1m]` просит миллионный контекст у
+        модели, у которой он есть: `claude-opus-5[1m]`.
+    availability_note:
+      en: >-
+        Which models your plan may run is known only to Claude Code, so nothing
+        here is verified: a name it does not accept shows up as a session that
+        refuses to start. If that happens, clear the field and try another.
+      ru: >-
+        Какие модели доступны вашей подписке, знает только Claude Code, поэтому
+        здесь ничего не проверяется: имя, которое он не принимает, проявится
+        сессией, отказавшейся запускаться. Если так вышло — очистите поле и
+        попробуйте другое.
+    precedence_note:
+      en: >-
+        This writes your own settings, `~/.claude/settings.json`. A project's
+        `.claude/settings.json`, a `--model` flag and `/model` inside a session
+        all win over it, so what is shown here is what is set, not necessarily
+        what a given session ends up using.
+      ru: >-
+        Здесь пишутся ваши личные настройки, `~/.claude/settings.json`. Проектный
+        `.claude/settings.json`, флаг `--model` и `/model` внутри сессии главнее,
+        так что показанное здесь — это то, что задано, а не обязательно то, на
+        чём в итоге работает конкретная сессия.
+    restart_note:
+      en: >-
+        Claude Code reads the settings when a session starts: running sessions and
+        the status line keep reporting the old model until they are restarted.
+      ru: >-
+        Claude Code читает настройки при старте сессии: уже запущенные сессии и
+        статусная строка будут показывать старую модель, пока их не перезапустят.
+    apply:
+      en: Apply
+      ru: Применить
+    clear:
+      en: Remove all overrides
+      ru: Убрать все переопределения
+    clear_hint:
+      en: >-
+        Removes every key on this page from settings.json, leaving the rest of
+        the file — and the hook — as it is. Claude Code goes back to choosing the
+        models itself.
+      ru: >-
+        Уберёт из settings.json все ключи с этой страницы, не тронув остальное в
+        файле и хук. Claude Code снова будет выбирать модели сам.
+    clear_confirm:
+      en: Remove all model overrides?
+      ru: Убрать все переопределения моделей?
+    applied:
+      en: "Written to %{path}"
+      ru: "Записано в %{path}"
+    cleared:
+      en: Model overrides removed
+      ru: Переопределения моделей убраны
+    warn:
+      environment:
+        en: >-
+          %{name} is also set in this program's environment (%{value}). Whichever
+          value a session gets then depends on how Claude Code was started —
+          remove one of the two.
+        ru: >-
+          %{name} задана и в окружении этой программы (%{value}). Какое значение
+          достанется сессии, зависит от того, как запускали Claude Code, —
+          уберите одно из двух.
+      duplicate:
+        en: >-
+          settings.json also sets ANTHROPIC_MODEL (%{value}), which names the
+          session model just like the field above. Keep one of them.
+        ru: >-
+          В settings.json задана ещё и ANTHROPIC_MODEL (%{value}) — она задаёт
+          модель сессии так же, как поле выше. Оставьте что-то одно.
+      legacy:
+        en: >-
+          settings.json still carries %{name} (%{value}), the old name of the
+          Haiku override. Use the field above instead.
+        ru: >-
+          В settings.json остался %{name} (%{value}) — прежнее имя настройки для
+          Haiku. Пользуйтесь полем выше.
+      unknown:
+        en: >-
+          "%{value}" (%{slot}) is not a model this version knows about. That may
+          be fine — new ones appear faster than releases of this program — but
+          check it for a typo.
+        ru: >-
+          «%{value}» (%{slot}) — модель, о которой эта версия не знает. Возможно,
+          всё в порядке: новые появляются быстрее, чем обновления этой программы.
+          Но проверьте, нет ли опечатки.
   statusline:
     title:
       en: Status line

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value, json};
 
-use crate::{paths, tr_args};
+use crate::{paths, settings, tr_args};
 
 /// Name of the program, without an extension.
 pub const BIN: &str = "claude-status";
@@ -70,7 +70,7 @@ pub fn command_string(exe: &Path) -> String {
 
 /// Reads the current registration state.
 pub fn status() -> Result<InstallStatus> {
-    let settings = read_settings()?;
+    let settings = settings::read()?;
     Ok(classify(&settings, &hook_path()?))
 }
 
@@ -118,7 +118,7 @@ fn same_command(command: &str, wanted: &str) -> bool {
 /// pauses. `force` permits overwriting a third-party command.
 pub fn install(refresh_interval: Option<u64>, force: bool) -> Result<PathBuf> {
     let exe = hook_path()?;
-    let mut settings = read_settings()?;
+    let mut settings = settings::read()?;
 
     match classify(&settings, &exe) {
         InstallStatus::Foreign { command } if !force => {
@@ -134,13 +134,13 @@ pub fn install(refresh_interval: Option<u64>, force: bool) -> Result<PathBuf> {
     }
     settings.insert("statusLine".into(), entry);
 
-    write_settings(&settings)?;
+    settings::write(&settings)?;
     Ok(exe)
 }
 
 /// Removes our hook from the settings, restoring the previous command if any.
 pub fn uninstall() -> Result<()> {
-    let mut settings = read_settings()?;
+    let mut settings = settings::read()?;
     match classify(&settings, &hook_path()?) {
         InstallStatus::Absent => return Ok(()),
         InstallStatus::Foreign { command } => {
@@ -155,46 +155,7 @@ pub fn uninstall() -> Result<()> {
         Some(previous) => settings.insert("statusLine".into(), previous),
         None => settings.remove("statusLine"),
     };
-    write_settings(&settings)
-}
-
-fn read_settings() -> Result<Map<String, Value>> {
-    let path = paths::claude_settings()?;
-    let raw = match std::fs::read_to_string(&path) {
-        Ok(raw) => raw,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Map::new()),
-        Err(e) => {
-            return Err(e).with_context(|| {
-                tr_args("error.read_file", &[("path", &path.display().to_string())])
-            });
-        }
-    };
-    if raw.trim().is_empty() {
-        return Ok(Map::new());
-    }
-    let value: Value = serde_json::from_str(&raw)
-        .with_context(|| tr_args("error.parse_file", &[("path", &path.display().to_string())]))?;
-    match value {
-        Value::Object(map) => Ok(map),
-        _ => bail!(tr_args("error.not_an_object", &[("path", &path.display().to_string())])),
-    }
-}
-
-/// Writes the settings, taking a backup first.
-fn write_settings(settings: &Map<String, Value>) -> Result<()> {
-    let path = paths::claude_settings()?;
-
-    if path.exists() {
-        let backup = paths::ensure_data_dir()?.join("settings.json.bak");
-        std::fs::copy(&path, &backup).with_context(|| {
-            tr_args("error.backup", &[("path", &backup.display().to_string())])
-        })?;
-    }
-
-    let mut raw = serde_json::to_string_pretty(&Value::Object(settings.clone()))?;
-    raw.push('\n');
-    std::fs::write(&path, raw)
-        .with_context(|| tr_args("error.write_file", &[("path", &path.display().to_string())]))
+    settings::write(&settings)
 }
 
 /// File holding the third-party `statusLine` setting we displaced.

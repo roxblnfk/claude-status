@@ -52,6 +52,14 @@ total by repeating the history it continues.
 The period is picked on the History and Models tabs and stepped through with
 the arrows: last week, the month before last, or all of it, the same way.
 
+`opus`, `sonnet` and `haiku` are aliases, and Claude Code decides for itself
+which release each one means — a new one arrives and your sessions move onto it.
+**Settings → Models** points an alias at a particular release, so that
+`/model opus` keeps working and lands where you left it. It also sets the model a
+session starts on and the one subagents run on. Which models your plan may run is
+known only to Claude Code, so nothing there is verified — a name it does not
+accept shows up as a session that refuses to start.
+
 The status line template is edited in the window, with a live preview, ready
 presets and the list of placeholders.
 

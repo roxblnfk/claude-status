@@ -22,6 +22,9 @@ pub enum Page {
     /// Where the figures come from.
     #[default]
     Source,
+    /// Which models Claude Code is pinned to. Claude Code's own configuration
+    /// rather than ours, which is why it sits next to the hook page.
+    Models,
     Statusline,
     /// How the program itself behaves.
     Program,
@@ -32,6 +35,7 @@ impl Page {
     fn label(self) -> String {
         match self {
             Page::Source => tr("settings.page.source"),
+            Page::Models => tr("settings.page.models"),
             Page::Statusline => tr("settings.page.statusline"),
             Page::Program => tr("settings.page.program"),
             Page::Update => tr("settings.page.update"),
@@ -39,12 +43,14 @@ impl Page {
     }
 
     /// Whether the page holds anything written to `config.toml`, and so needs
-    /// the Save button. Everything on the update page acts at once.
+    /// the Save button. The update page acts at once, and the models page writes
+    /// to the Claude Code settings on a button of its own.
     fn has_settings(self) -> bool {
-        !matches!(self, Page::Update)
+        !matches!(self, Page::Update | Page::Models)
     }
 
-    const ALL: [Page; 4] = [Page::Source, Page::Statusline, Page::Program, Page::Update];
+    const ALL: [Page; 5] =
+        [Page::Source, Page::Models, Page::Statusline, Page::Program, Page::Update];
 }
 
 /// Widget state that survives between frames.
@@ -61,6 +67,8 @@ pub struct SettingsState {
     /// The same for recounting the logs from scratch, which is destructive in
     /// its own way: days whose logs are gone cannot come back.
     confirming_rescan: bool,
+    /// The models page, which edits the Claude Code settings rather than ours.
+    models: crate::ui::model_override::ModelState,
 }
 
 impl Default for SettingsState {
@@ -72,6 +80,7 @@ impl Default for SettingsState {
             message: None,
             confirming_reset: false,
             confirming_rescan: false,
+            models: Default::default(),
         }
     }
 }
@@ -85,6 +94,8 @@ pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut SettingsStat
                 // taken on; carried over it reads as a comment on this one.
                 ui_state.message = None;
                 ui_state.confirming_reset = false;
+                ui_state.confirming_rescan = false;
+                ui_state.models.forget_confirmation();
             }
         }
     });
@@ -102,6 +113,12 @@ pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut SettingsStat
                 ui.add_space(12.0);
                 probe_section(ui, state, &mut ui_state.confirming_rescan);
             }
+            Page::Models => crate::ui::model_override::draw(
+                ui,
+                state,
+                &mut ui_state.models,
+                &mut ui_state.message,
+            ),
             Page::Statusline => statusline_section(ui, state, template),
             Page::Program => {
                 language_section(ui, state);

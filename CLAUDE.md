@@ -45,6 +45,16 @@ sources for literal `tr(...)` keys and asks for each one.
 **The data directory on Windows is `%APPDATA%` (roaming), not
 `%LOCALAPPDATA%`** — `dirs::data_dir()`.
 
+**Which model a session will run cannot be worked out from here.** The models
+page writes five keys across two levels of `~/.claude/settings.json`, and a
+project's `.claude/settings.json`, `--model` and `/model` all beat them; whether
+an account may run a given model is known only to Claude Code. So the page
+reports what is *set*, never what will be used, and the list of ids is a
+shortcut a person may type past — validating against it would reject both the
+`[1m]` suffix and every model released after this build. Two features now write
+that file, so both go through `core::settings`: it holds the one backup slot,
+and a write that bypassed it would lose somebody's hand-made configuration.
+
 **Per-model and per-project tokens are counted here, not read.**
 `~/.claude/stats-cache.json` carries the same numbers already aggregated, and
 the plots used to take them — until Claude Code stopped recomputing the file
@@ -87,6 +97,11 @@ and screenshot the window from PowerShell — find the top-level window of the
 `CopyFromScreen`. Clicking works through `SetCursorPos` + `mouse_event`, but
 coordinates go through DPI virtualisation, so read them off the captured image
 rather than from `GetWindowRect`. Revert the tab default afterwards.
+
+An `egui::Grid` column takes the width of its widest cell, which sounds fine
+until the widest cell is a short label: the column collapses and the others wrap
+a letter at a time. Reserve the width by hand (`set_min_width` + `set_max_width`)
+or lay the row out with `horizontal` instead. Only a screenshot shows this.
 
 Verifying against real data: copy the user's database to a temp directory and
 point `CLAUDE_STATUS_DIR` at it, or generate a synthetic one — a throwaway test

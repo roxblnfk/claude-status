@@ -7,6 +7,7 @@ use anyhow::Result;
 use claude_status_core::{
     Config, Db, Sample, Totals, autostart, db,
     install::{self, InstallStatus},
+    model_override,
     pace::Overview,
     probe, scan,
     stats_cache::StatsCache,
@@ -128,6 +129,11 @@ pub struct AppState {
     pub counted_since: Option<String>,
     pub last_scan_ts: i64,
     pub install: InstallStatus,
+    /// Which models the Claude Code settings pin, and anything questionable
+    /// about that. Read from their file every refresh for the same reason as
+    /// `install` and `autostart`: it is not ours, and anything can change it.
+    pub model_overrides: model_override::Overrides,
+    pub model_warnings: Vec<model_override::Warning>,
     /// Whether the session starts us, read from the operating system rather
     /// than mirrored in the configuration — a mirror would drift.
     pub autostart: autostart::State,
@@ -201,6 +207,8 @@ impl AppState {
             counted_since: None,
             last_scan_ts: 0,
             install: InstallStatus::Absent,
+            model_overrides: model_override::Overrides::default(),
+            model_warnings: Vec::new(),
             autostart: autostart::State::Off,
             error: None,
             refreshed_at: 0,
@@ -233,6 +241,12 @@ impl AppState {
         }
 
         self.install = install::status().unwrap_or(InstallStatus::Absent);
+        // A settings file that cannot be read leaves these empty — the same
+        // silence `install` above answers with, and for the same reason: the
+        // window keeps drawing whatever state the rest of the world is in.
+        let (overrides, warnings) = model_override::read_with_warnings().unwrap_or_default();
+        self.model_overrides = overrides;
+        self.model_warnings = warnings;
         self.autostart = autostart::state().unwrap_or(autostart::State::Off);
         self.maybe_probe(now);
         if scan::due(self.last_scan_ts, now) {
@@ -562,6 +576,8 @@ mod tests {
             counted_since: None,
             last_scan_ts: 0,
             install: InstallStatus::Absent,
+            model_overrides: model_override::Overrides::default(),
+            model_warnings: Vec::new(),
             autostart: autostart::State::Off,
             error: None,
             refreshed_at: 0,

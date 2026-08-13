@@ -8,6 +8,7 @@ use claude_status_core::{
     Config, Db, autostart,
     db::Span,
     install::{self, InstallStatus},
+    model_override::{self, Slot},
     paths, probe,
     render::{self, RenderContext},
     timefmt, tr, tr_args, update,
@@ -31,11 +32,23 @@ pub enum Command {
     Probe,
     /// Count tokens from the session logs.
     Scan,
+    /// Show or change which models Claude Code uses.
+    Models(ModelsAction),
     /// Read one status line payload from stdin. What Claude Code runs.
     Hook,
     /// Fetch a newer release from GitHub and put it in place.
     Update,
     Help,
+}
+
+/// What `claude-status models` was asked to do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelsAction {
+    /// Print what is pinned, and what is questionable about it.
+    Show,
+    Set { slot: Slot, model: String },
+    /// One slot, or every one of them.
+    Clear { slot: Option<Slot> },
 }
 
 pub fn parse(args: impl Iterator<Item = String>) -> Result<Command> {
@@ -53,6 +66,7 @@ pub fn parse(args: impl Iterator<Item = String>) -> Result<Command> {
         "preview" => Ok(Command::Preview { template: args.get(1).cloned() }),
         "probe" => Ok(Command::Probe),
         "scan" => Ok(Command::Scan),
+        "models" => parse_models(&args[1..]),
         install::HOOK_ARG => Ok(Command::Hook),
         "update" => Ok(Command::Update),
         other => bail!(
@@ -84,6 +98,38 @@ fn parse_install(args: &[String]) -> Result<Command> {
         }
     }
     Ok(Command::Install { interval, force })
+}
+
+fn parse_models(args: &[String]) -> Result<Command> {
+    let action = match args.first().map(String::as_str) {
+        None | Some("show") => ModelsAction::Show,
+        Some("set") => {
+            let (Some(slot), Some(model)) = (args.get(1), args.get(2)) else {
+                bail!(tr("cli.models.set_usage"));
+            };
+            ModelsAction::Set { slot: parse_slot(slot)?, model: model.clone() }
+        }
+        Some("clear") => match args.get(1).map(String::as_str) {
+            Some("--all") => ModelsAction::Clear { slot: None },
+            Some(slot) => ModelsAction::Clear { slot: Some(parse_slot(slot)?) },
+            None => bail!(tr_args("cli.models.clear_usage", &[("slots", &slot_names())])),
+        },
+        Some(other) => bail!(tr_args("cli.unknown_command", &[("command", other)])),
+    };
+    Ok(Command::Models(action))
+}
+
+fn parse_slot(name: &str) -> Result<Slot> {
+    Slot::parse(name).ok_or_else(|| {
+        anyhow::anyhow!(tr_args(
+            "cli.models.unknown_slot",
+            &[("slot", name), ("slots", &slot_names())]
+        ))
+    })
+}
+
+fn slot_names() -> String {
+    Slot::ALL.map(Slot::name).join(", ")
 }
 
 pub fn run(command: Command) -> Result<()> {
@@ -119,8 +165,73 @@ pub fn run(command: Command) -> Result<()> {
         Command::Preview { template } => preview(template.as_deref()),
         Command::Probe => probe_once(),
         Command::Scan => scan_now(),
+        Command::Models(action) => models(action),
         Command::Update => update_now(),
     }
+}
+
+/// Shows or changes which models Claude Code uses.
+///
+/// A change prints the state it produced rather than only confirming itself:
+/// this writes into somebody else's file, and the point of seeing the result is
+/// noticing what else is in there — a duplicate key, a variable in the
+/// environment — before wondering why a session ignores the setting.
+fn models(action: ModelsAction) -> Result<()> {
+    match action {
+        ModelsAction::Show => {}
+        ModelsAction::Set { slot, model } => {
+            let mut overrides = model_override::read()?;
+            overrides.set(slot, &model);
+            let path = model_override::apply(&overrides)?;
+
+            println!(
+                "{}",
+                tr_args("cli.models.set_done", &[("label", &slot.label()), ("value", &model)])
+            );
+            println!(
+                "{}",
+                tr_args("settings.models.applied", &[("path", &path.display().to_string())])
+            );
+        }
+        ModelsAction::Clear { slot: Some(slot) } => {
+            let mut overrides = model_override::read()?;
+            overrides.set(slot, "");
+            model_override::apply(&overrides)?;
+            println!("{}", tr_args("cli.models.cleared_slot", &[("label", &slot.label())]));
+        }
+        ModelsAction::Clear { slot: None } => {
+            model_override::clear()?;
+            println!("{}", tr("settings.models.cleared"));
+        }
+    }
+
+    let (overrides, warnings) = model_override::read_with_warnings()?;
+    let path = paths::claude_settings()?;
+
+    println!("\n{}", tr_args("cli.models.header", &[("path", &path.display().to_string())]));
+    if overrides.is_empty() {
+        println!("  {}", tr("settings.models.nothing_set"));
+    }
+    for (slot, value) in overrides.entries() {
+        println!(
+            "{}",
+            tr_args(
+                "cli.models.row",
+                &[("label", &slot.label()), ("key", slot.key()), ("value", value)]
+            )
+        );
+    }
+
+    if !warnings.is_empty() {
+        println!("\n{}", tr("cli.models.warnings"));
+        for warning in &warnings {
+            println!("  {}", warning.text());
+        }
+    }
+    if !overrides.is_empty() {
+        println!("\n{}", tr("settings.models.restart_note"));
+    }
+    Ok(())
 }
 
 /// Checks for a newer release and installs it if there is one.
@@ -374,6 +485,59 @@ mod tests {
             parse_args(&["preview", "{week_pct}"]).unwrap(),
             Command::Preview { template: Some("{week_pct}".into()) }
         );
+    }
+
+    #[test]
+    fn models_defaults_to_showing_what_is_set() {
+        assert_eq!(parse_args(&["models"]).unwrap(), Command::Models(ModelsAction::Show));
+        assert_eq!(parse_args(&["models", "show"]).unwrap(), Command::Models(ModelsAction::Show));
+    }
+
+    #[test]
+    fn models_set_takes_a_slot_and_a_model() {
+        assert_eq!(
+            parse_args(&["models", "set", "opus", "claude-opus-4-8"]).unwrap(),
+            Command::Models(ModelsAction::Set {
+                slot: Slot::Opus,
+                model: "claude-opus-4-8".into()
+            })
+        );
+    }
+
+    /// Whatever Claude Code accepts has to survive the command line, suffix and
+    /// all — a value mangled on the way in would be blamed on Claude Code.
+    #[test]
+    fn models_set_passes_the_value_through_untouched() {
+        let Command::Models(ModelsAction::Set { model, .. }) =
+            parse_args(&["models", "set", "default", "claude-opus-5[1m]"]).unwrap()
+        else {
+            panic!("expected a set");
+        };
+        assert_eq!(model, "claude-opus-5[1m]");
+    }
+
+    #[test]
+    fn models_clear_takes_one_slot_or_all_of_them() {
+        assert_eq!(
+            parse_args(&["models", "clear", "haiku"]).unwrap(),
+            Command::Models(ModelsAction::Clear { slot: Some(Slot::Haiku) })
+        );
+        assert_eq!(
+            parse_args(&["models", "clear", "--all"]).unwrap(),
+            Command::Models(ModelsAction::Clear { slot: None })
+        );
+    }
+
+    /// Every rejection has to name the slots, or the only way to find them is
+    /// the full help.
+    #[test]
+    fn models_rejects_a_bad_slot_and_a_missing_value() {
+        let error = parse_args(&["models", "set", "gpt", "x"]).unwrap_err().to_string();
+        assert!(error.contains("subagent"), "{error}");
+
+        assert!(parse_args(&["models", "set", "opus"]).is_err());
+        assert!(parse_args(&["models", "clear"]).unwrap_err().to_string().contains("subagent"));
+        assert!(parse_args(&["models", "frobnicate"]).is_err());
     }
 
     #[test]

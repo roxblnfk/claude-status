@@ -1,6 +1,7 @@
 //! The statistics window.
 
 pub mod history;
+mod model_override;
 mod models;
 mod overview;
 mod settings;
