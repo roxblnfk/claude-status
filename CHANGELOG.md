@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.0](https://github.com/roxblnfk/claude-status/compare/v1.4.1...v1.5.0) (2026-08-13)
+
+
+### Features
+
+* break the count down by project and by subagent ([378a2a2](https://github.com/roxblnfk/claude-status/commit/378a2a2f07f92b83abf0151a97469e30512a3fd7))
+* count tokens from the session logs ([378a2a2](https://github.com/roxblnfk/claude-status/commit/378a2a2f07f92b83abf0151a97469e30512a3fd7))
+
 ## [1.4.1](https://github.com/roxblnfk/claude-status/compare/v1.4.0...v1.4.1) (2026-08-12)
 
 
