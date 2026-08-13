@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/roxblnfk/claude-status/compare/v1.5.0...v1.6.0) (2026-08-13)
+
+
+### Features
+
+* pin which models Claude Code uses ([d64c381](https://github.com/roxblnfk/claude-status/commit/d64c381ceacf4c1402b3b8fd8a1184bb72e3459d))
+
 ## [1.5.0](https://github.com/roxblnfk/claude-status/compare/v1.4.1...v1.5.0) (2026-08-13)
 
 
