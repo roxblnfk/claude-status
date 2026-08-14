@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/roxblnfk/claude-status/compare/v1.6.0...v1.7.0) (2026-08-14)
+
+
+### Features
+
+* show today's ration as a bar on the overview tab ([f05d8d7](https://github.com/roxblnfk/claude-status/commit/f05d8d7befc45bca242c5f75035e83bb6b5c561e))
+
 ## [1.6.0](https://github.com/roxblnfk/claude-status/compare/v1.5.0...v1.6.0) (2026-08-13)
 
 
