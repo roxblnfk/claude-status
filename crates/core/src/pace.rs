@@ -136,6 +136,10 @@ pub struct DailyBudget {
     pub spent_pct: f64,
     /// Percent of the weekly window today may take.
     pub allowance_pct: f64,
+    /// How much of the local day has passed, 0..1 — the even-pace mark against
+    /// which the spending is read, the same role the elapsed tick plays for a
+    /// window.
+    pub day_elapsed: f64,
     /// Nothing was recorded before midnight, so the starting level had to be
     /// estimated rather than read.
     pub estimated: bool,
@@ -150,6 +154,7 @@ impl DailyBudget {
         Self {
             spent_pct: (week.used_pct - at_midnight).max(0.0),
             allowance_pct: ((100.0 - at_midnight) / days).max(0.0),
+            day_elapsed: ((week.now - midnight) as f64 / SECS_PER_DAY).clamp(0.0, 1.0),
             estimated,
         }
     }
@@ -350,6 +355,15 @@ mod tests {
         assert!((d.spent_pct - 6.0).abs() < 1e-6, "{d:?}");
         assert!((d.used_pct() - 40.0).abs() < 1e-6, "{d:?}");
         assert!((d.remaining_pct() - 9.0).abs() < 1e-6, "{d:?}");
+    }
+
+    // The tick on the daily bar sits at the clock, not the spending: noon is
+    // half the day gone whatever has been used by then.
+    #[test]
+    fn the_day_elapsed_mark_follows_the_clock() {
+        let w = week(16.0, DAY + DAY / 2);
+        let d = DailyBudget::new(&w, 10.0, false, DAY);
+        assert!((d.day_elapsed - 0.5).abs() < 1e-6, "{d:?}");
     }
 
     #[test]

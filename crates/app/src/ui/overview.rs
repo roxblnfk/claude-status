@@ -1,6 +1,9 @@
 //! The "Overview" tab: current window state and the daily spending advice.
 
-use claude_status_core::{pace::WindowState, timefmt, tr, tr_args};
+use claude_status_core::{
+    pace::{DailyBudget, WindowState},
+    timefmt, tr, tr_args,
+};
 use eframe::egui;
 
 use crate::state::AppState;
@@ -17,6 +20,14 @@ pub fn draw(ui: &mut egui::Ui, state: &AppState) -> Option<Tab> {
     egui::ScrollArea::vertical().show(ui, |ui| {
         if let Some(w) = state.overview.five_hour {
             window_card(ui, &tr("overview.card.five_hour"), &w, true);
+            ui.add_space(8.0);
+        }
+        // The same reading the inner ring of the tray icon carries: how much of
+        // today's ration is gone. It sits under the session because the two are
+        // the pair the icon shows, and both are about right now rather than the
+        // week as a whole.
+        if let Some(d) = state.overview.daily {
+            daily_card(ui, &d);
             ui.add_space(8.0);
         }
         if let Some(w) = state.overview.week {
@@ -162,36 +173,14 @@ fn window_card(ui: &mut egui::Ui, title: &str, w: &WindowState, short_window: bo
 }
 
 /// The usage bar.
-///
-/// The label is placed by hand rather than handed to the widget, which would
-/// always pin it to the left edge. Every fill colour here is a light one, so
-/// text that lands on the fill is dark and text on the bare track follows the
-/// theme. The awkward case is a short fill: egui never draws it narrower than
-/// the bar is tall, so even a reading of nought leaves a coloured cap under a
-/// left-pinned label. Below the width the label needs, it moves past the edge
-/// of the fill instead of straddling it.
 fn usage_bar(ui: &mut egui::Ui, used_pct: f64, w: &WindowState) {
     let fraction = (used_pct / 100.0).clamp(0.0, 1.0) as f32;
-    let padding = ui.spacing().item_spacing.x;
-    let galley = ui.painter().layout_no_wrap(
-        format!("{used_pct:.1}%"),
-        egui::TextStyle::Button.resolve(ui.style()),
-        egui::Color32::PLACEHOLDER,
-    );
-
     let bar = ui.add(egui::ProgressBar::new(fraction).fill(level_color(used_pct)));
     let rect = bar.rect;
     let filled = (rect.width() * fraction).max(rect.height());
 
-    elapsed_tick(ui, rect, filled, w);
-
-    let (x, color) = if filled >= padding + galley.size().x + padding {
-        (rect.left() + padding, egui::Color32::from_gray(24))
-    } else {
-        (rect.left() + filled + padding, ui.visuals().text_color())
-    };
-    let pos = egui::pos2(x, rect.center().y - galley.size().y / 2.0);
-    ui.painter().with_clip_rect(rect).galley(pos, galley, color);
+    elapsed_tick(ui, rect, filled, w.elapsed_fraction());
+    bar_label(ui, rect, filled, format!("{used_pct:.1}%"));
 
     bar.on_hover_text(tr_args(
         "overview.elapsed_hint",
@@ -203,14 +192,89 @@ fn usage_bar(ui: &mut egui::Ui, used_pct: f64, w: &WindowState) {
     ));
 }
 
+/// The percentage written onto a bar.
+///
+/// The label is placed by hand rather than handed to the widget, which would
+/// always pin it to the left edge. Every fill colour here is a light one, so
+/// text that lands on the fill is dark and text on the bare track follows the
+/// theme. The awkward case is a short fill: egui never draws it narrower than
+/// the bar is tall, so even a reading of nought leaves a coloured cap under a
+/// left-pinned label. Below the width the label needs, it moves past the edge
+/// of the fill instead of straddling it.
+fn bar_label(ui: &egui::Ui, rect: egui::Rect, filled: f32, text: String) {
+    let padding = ui.spacing().item_spacing.x;
+    let galley = ui.painter().layout_no_wrap(
+        text,
+        egui::TextStyle::Button.resolve(ui.style()),
+        egui::Color32::PLACEHOLDER,
+    );
+    let (x, color) = if filled >= padding + galley.size().x + padding {
+        (rect.left() + padding, egui::Color32::from_gray(24))
+    } else {
+        (rect.left() + filled + padding, ui.visuals().text_color())
+    };
+    let pos = egui::pos2(x, rect.center().y - galley.size().y / 2.0);
+    ui.painter().with_clip_rect(rect).galley(pos, galley, color);
+}
+
+/// Today's ration as a card of its own — the same figure the inner ring of the
+/// tray icon carries.
+fn daily_card(ui: &mut egui::Ui, d: &DailyBudget) {
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+
+        ui.horizontal(|ui| {
+            ui.strong(tr("overview.card.today"));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let label = ui.label(tr_args(
+                    "overview.today_ration",
+                    &[("allowance", &format!("{:.1}", d.allowance_pct))],
+                ));
+                // The ration can be a guess when collecting began mid-week; the
+                // budget card below carries the same caveat, so mark it here too.
+                if d.estimated {
+                    label.on_hover_text(tr("overview.budget.today_estimated"));
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+        daily_bar(ui, d);
+    });
+}
+
+/// The ration bar: how much of what today may take is gone. Unlike the window
+/// bars this is spending against a per-day allowance, so it passes 100 % on an
+/// overspent day — the fill is clamped, the colour is not.
+fn daily_bar(ui: &mut egui::Ui, d: &DailyBudget) {
+    let used_pct = d.used_pct();
+    let fraction = (used_pct / 100.0).clamp(0.0, 1.0) as f32;
+    let bar = ui.add(egui::ProgressBar::new(fraction).fill(level_color(used_pct)));
+    let rect = bar.rect;
+    let filled = (rect.width() * fraction).max(rect.height());
+
+    elapsed_tick(ui, rect, filled, d.day_elapsed);
+    bar_label(ui, rect, filled, format!("{used_pct:.0}%"));
+
+    bar.on_hover_text(tr_args(
+        "overview.today_hint",
+        &[
+            ("spent", &format!("{:.1}", d.spent_pct)),
+            ("allowance", &format!("{:.1}", d.allowance_pct)),
+            ("left", &format!("{:.1}", d.remaining_pct())),
+            ("elapsed", &format!("{:.0}", d.day_elapsed * 100.0)),
+        ],
+    ));
+}
+
 /// Where the window itself stands: three hours into five is a tick at 60 %.
 ///
 /// The bar says how much of the limit is gone, which on its own answers
 /// nothing — 60 % spent is comfortable on the last day of a week and alarming
 /// on the first. Fill short of the tick means the spending is behind the clock,
 /// past it means ahead.
-fn elapsed_tick(ui: &egui::Ui, rect: egui::Rect, filled: f32, w: &WindowState) {
-    let at = rect.left() + rect.width() * w.elapsed_fraction() as f32;
+fn elapsed_tick(ui: &egui::Ui, rect: egui::Rect, filled: f32, fraction: f64) {
+    let at = rect.left() + rect.width() * fraction as f32;
     // Every fill colour here is a light one and the bare track is dark, so a
     // tick of a single colour would vanish on whichever side it landed.
     let color = if at <= rect.left() + filled {

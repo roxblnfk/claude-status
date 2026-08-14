@@ -648,6 +648,7 @@ mod tests {
         overview.daily = Some(DailyBudget {
             spent_pct: 3.0,
             allowance_pct: 12.0,
+            day_elapsed: 0.5,
             estimated: false,
         });
         let state = state_with(overview);

@@ -565,6 +565,25 @@ overview:
     week_scoped:
       en: "Week — %{model}"
       ru: "Неделя — %{model}"
+    today:
+      en: Today
+      ru: Сегодня
+  today_ration:
+    en: "ration %{allowance}%"
+    ru: "норма %{allowance}%"
+  today_hint:
+    en: >-
+      How much of today's ration is gone: %{spent}% spent of the %{allowance}%
+      the day may take, %{left}% still free. The tick marks how much of the day
+      itself has passed, %{elapsed}%; fill short of it means spending slower than
+      the day. The ration is set at midnight and held for the day — this is what
+      the inner ring of the tray icon shows.
+    ru: >-
+      Сколько израсходовано нормы на сегодня: потрачено %{spent}% из %{allowance}%,
+      что допускает день, свободно ещё %{left}%. Засечка показывает, сколько
+      прошло самого дня — %{elapsed}%; заполнение до неё — расход медленнее хода
+      дня. Норма назначается в полночь и держится весь день — именно её показывает
+      внутреннее кольцо иконки в трее.
   expired:
     en: window has already reset
     ru: окно уже сброшено
