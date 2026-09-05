@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.8.0](https://github.com/roxblnfk/claude-status/compare/v1.7.0...v1.8.0) (2026-09-05)
+
+
+### Features
+
+* make the refresh button ask Claude Code for the limits ([b7d1b21](https://github.com/roxblnfk/claude-status/commit/b7d1b214731a50ef2526aa4d468a860efcc71d19))
+
+
+### Bug Fixes
+
+* read each window at its newest sample instead of its peak ([b7d1b21](https://github.com/roxblnfk/claude-status/commit/b7d1b214731a50ef2526aa4d468a860efcc71d19))
+
 ## [1.7.0](https://github.com/roxblnfk/claude-status/compare/v1.6.0...v1.7.0) (2026-08-14)
 
 
