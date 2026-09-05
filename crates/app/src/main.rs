@@ -147,7 +147,10 @@ impl eframe::App for App {
         for action in actions {
             match action {
                 TrayAction::Show => self.show_window(ctx),
-                TrayAction::Refresh => self.refresh(),
+                TrayAction::Refresh => {
+                    self.state.request_probe();
+                    self.refresh();
+                }
                 TrayAction::Quit => {
                     self.quitting = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -167,7 +170,7 @@ impl eframe::App for App {
         }
 
         let period = Duration::from_secs(self.state.config.tray.refresh_secs.max(1));
-        if self.last_refresh.elapsed() >= period {
+        if self.last_refresh.elapsed() >= period || self.state.probe_outcome_pending() {
             self.refresh();
         }
 

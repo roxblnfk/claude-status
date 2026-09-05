@@ -507,8 +507,14 @@ ui:
       en: Settings
       ru: Настройки
   refresh_hint:
+    en: Reload the data and ask Claude Code for the current limits
+    ru: Перечитать данные и запросить лимиты у Claude Code
+  refresh_hint_plain:
     en: Reload the data
     ru: Перечитать данные
+  probing:
+    en: asking Claude Code…
+    ru: запрос к Claude Code…
   refreshed_at:
     en: "updated %{time}"
     ru: "обновлено %{time}"

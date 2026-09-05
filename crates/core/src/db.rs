@@ -461,18 +461,24 @@ impl Db {
 
     /// The true current state of every window.
     ///
-    /// Several Claude Code sessions write here at once, and an idle one keeps
-    /// repeating the reading it captured long ago — the newest row is therefore
-    /// not the newest data. Within one window (same `resets_at`) usage only
-    /// ever grows, so the highest reading is the current one.
+    /// Several Claude Code sessions write here at once, so the newest row is
+    /// only the newest *state*, not a snapshot of every window. Each is
+    /// assembled on its own: the boundary is the latest any row carries — a
+    /// window never rolls back — and the reading is the newest row within it.
+    ///
+    /// Not the highest. That was the rule once, on the theory that an idle
+    /// session replays stale, lower readings; the database shows that noise at
+    /// two points at most, while Anthropic zeroed the weekly counters twice in
+    /// the week Fable 5.1 shipped without touching the boundary, and the
+    /// maximum showed 32 % for hours against 12 % on the history plot.
     pub fn current_sample(&self) -> Result<Option<Sample>> {
         let Some(latest) = self.latest()? else {
             return Ok(None);
         };
 
-        let (five_pct, five_resets_at) = self.window_peak("five_pct", "five_resets_at")?;
-        let (week_pct, week_resets_at) = self.window_peak("week_pct", "week_resets_at")?;
-        let (opus_pct, opus_resets_at) = self.window_peak("opus_pct", "opus_resets_at")?;
+        let (five_pct, five_resets_at) = self.window_reading("five_pct", "five_resets_at")?;
+        let (week_pct, week_resets_at) = self.window_reading("week_pct", "week_resets_at")?;
+        let (opus_pct, opus_resets_at) = self.window_reading("opus_pct", "opus_resets_at")?;
 
         Ok(Some(Sample {
             five_pct,
@@ -485,8 +491,8 @@ impl Db {
         }))
     }
 
-    /// Highest reading of a window within its latest boundary.
-    fn window_peak(&self, pct: &str, resets_at: &str) -> Result<(Option<f64>, Option<i64>)> {
+    /// Newest reading of a window within its latest boundary.
+    fn window_reading(&self, pct: &str, resets_at: &str) -> Result<(Option<f64>, Option<i64>)> {
         let boundary: Option<i64> = self
             .conn
             .query_row(
@@ -500,18 +506,38 @@ impl Db {
         let Some(boundary) = boundary else {
             return Ok((None, None));
         };
+        Ok((self.reading_at(pct, resets_at, boundary)?, Some(boundary)))
+    }
 
-        let peak: Option<f64> = self
+    /// Newest reading of a window within the given boundary.
+    fn reading_at(&self, pct: &str, resets_at: &str, boundary: i64) -> Result<Option<f64>> {
+        Ok(self
             .conn
             .query_row(
-                &format!("SELECT MAX({pct}) FROM samples WHERE {resets_at} = ?1"),
+                &format!(
+                    "SELECT {pct} FROM samples
+                     WHERE {resets_at} = ?1 AND {pct} IS NOT NULL
+                     ORDER BY ts DESC, id DESC LIMIT 1"
+                ),
                 params![boundary],
                 |r| r.get(0),
             )
-            .optional()?
-            .flatten();
+            .optional()?)
+    }
 
-        Ok((peak, Some(boundary)))
+    /// The last reading before the weekly counter was zeroed, if it was.
+    ///
+    /// Usage only grows until Anthropic resets it, and that happens inside a
+    /// window with the boundary left alone. A reading more than the noise
+    /// above the current one therefore cannot belong to the same run of the
+    /// counter; the run is whatever came after the newest of them. `None`
+    /// when no reset is visible in the window.
+    fn week_reset_before(&self, boundary: i64, current_pct: f64) -> Result<Option<i64>> {
+        Ok(self.conn.query_row(
+            "SELECT MAX(ts) FROM samples WHERE week_resets_at = ?1 AND week_pct > ?2",
+            params![boundary, current_pct + READING_NOISE_PCT],
+            |r| r.get(0),
+        )?)
     }
 
     /// Samples within `[from, to]`, in chronological order.
@@ -527,40 +553,50 @@ impl Db {
     ///
     /// The hook runs on every assistant message, so reading the whole history
     /// just to compute a pace is out of the question — two points are enough
-    /// for a linear estimate. They are the earliest reading of the current
-    /// window and the moment it first reached its peak: taking the newest row
-    /// instead would measure against whatever an idle session last repeated.
+    /// for a linear estimate. They are the earliest reading of the current run
+    /// of the counter and the current reading where it was last confirmed. A
+    /// point from before a reset would read as a negative pace, the same way a
+    /// point from the previous window would.
     pub fn burn_endpoints(&self) -> Result<Vec<Sample>> {
         let Some(current) = self.current_sample()? else {
             return Ok(Vec::new());
         };
-        let Some(boundary) = current.week_resets_at else {
+        let (Some(boundary), Some(pct)) = (current.week_resets_at, current.week_pct) else {
             return Ok(vec![current]);
         };
+        let since = self.week_reset_before(boundary, pct)?.unwrap_or(i64::MIN);
 
-        let pick = |order: &str| -> Result<Option<Sample>> {
-            Ok(self
-                .conn
-                .query_row(
-                    &format!(
-                        "SELECT {COLUMNS} FROM samples
-                         WHERE week_pct IS NOT NULL AND week_resets_at IS ?1
-                         ORDER BY {order} LIMIT 1"
-                    ),
-                    params![boundary],
-                    row_to_sample,
-                )
-                .optional()?)
-        };
+        let first = self
+            .conn
+            .query_row(
+                &format!(
+                    "SELECT {COLUMNS} FROM samples
+                     WHERE week_pct IS NOT NULL AND week_resets_at = ?1 AND ts > ?2
+                     ORDER BY ts, id LIMIT 1"
+                ),
+                params![boundary, since],
+                row_to_sample,
+            )
+            .optional()?;
+        // Among the rows at the current level the one confirmed latest: the
+        // pace is averaged up to the last observation, and the stretch where
+        // the level held is part of the average rather than something to cut
+        // away.
+        let last = self
+            .conn
+            .query_row(
+                &format!(
+                    "SELECT {COLUMNS} FROM samples
+                     WHERE week_pct = ?3 AND week_resets_at = ?1 AND ts > ?2
+                     ORDER BY MAX(ts, last_seen_ts) DESC, ts DESC, id DESC LIMIT 1"
+                ),
+                params![boundary, since, pct],
+                row_to_sample,
+            )
+            .optional()?;
 
-        let first = pick("ts, id")?;
-        // Among equal peaks the one confirmed latest: the pace is averaged up
-        // to the last observation, and the stretch where the level held is part
-        // of the average rather than something to cut away.
-        let peak = pick("week_pct DESC, last_seen_ts DESC, ts DESC, id DESC")?;
-
-        Ok(match (first, peak) {
-            (Some(first), Some(peak)) if first.id != peak.id => vec![first, peak],
+        Ok(match (first, last) {
+            (Some(first), Some(last)) if first.id != last.id => vec![first, last],
             _ => vec![current],
         })
     }
@@ -568,17 +604,28 @@ impl Db {
     /// The weekly percentage the day beginning at `midnight` started from.
     ///
     /// The flag says the level was estimated rather than read: it is `false`
-    /// when a reading from before midnight exists, or when the week itself
-    /// began after midnight and therefore stood at zero.
+    /// when a reading from before midnight exists, or when the counter began
+    /// its run — with the week, or with a reset — after midnight and therefore
+    /// stood at zero.
     pub fn week_baseline(&self, resets_at: i64, midnight: i64) -> Result<Option<(f64, bool)>> {
-        // The highest reading before midnight, for the same reason the current
-        // state is a maximum: idle sessions keep repeating stale snapshots.
-        let recorded: Option<f64> = self.conn.query_row(
-            "SELECT MAX(week_pct) FROM samples
-             WHERE week_resets_at IS ?1 AND ts <= ?2 AND week_pct IS NOT NULL",
-            params![resets_at, midnight],
-            |row| row.get(0),
-        )?;
+        let Some(current) = self.reading_at("week_pct", "week_resets_at", resets_at)? else {
+            return Ok(None);
+        };
+        let reset = self.week_reset_before(resets_at, current)?;
+
+        // The last reading before midnight, from the current run of the
+        // counter only: a level from before a reset is not what today started
+        // from, whatever the clock said when it was read.
+        let recorded: Option<f64> = self
+            .conn
+            .query_row(
+                "SELECT week_pct FROM samples
+                 WHERE week_resets_at = ?1 AND ts > ?2 AND ts <= ?3 AND week_pct IS NOT NULL
+                 ORDER BY ts DESC, id DESC LIMIT 1",
+                params![resets_at, reset.unwrap_or(i64::MIN), midnight],
+                |row| row.get(0),
+            )
+            .optional()?;
         if let Some(pct) = recorded {
             return Ok(Some((pct, false)));
         }
@@ -586,6 +633,15 @@ impl Db {
         let window_start = resets_at - SEVEN_DAY_SECS;
         if window_start >= midnight {
             return Ok(Some((0.0, false)));
+        }
+
+        // The counter was zeroed and nothing of the new run was seen before
+        // midnight. Whether the reset itself fell on this side of midnight is
+        // known only when the last reading before it did; otherwise zero is a
+        // guess — and the useful one, since whatever was spent before the
+        // reset is off the meter anyway.
+        if let Some(last_before_reset) = reset {
+            return Ok(Some((0.0, last_before_reset < midnight)));
         }
 
         // Nothing was recorded before midnight — collecting started later than
@@ -906,6 +962,12 @@ fn row_to_sample(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sample> {
     })
 }
 
+/// How far the readings of concurrent sessions have been seen to disagree
+/// within one window: whole percents, a point or two behind for the session
+/// whose last reply is the older. A reading further below an earlier one is
+/// not noise but a counter that was zeroed.
+const READING_NOISE_PCT: f64 = 2.0;
+
 /// Window boundaries are stored rounded to the minute.
 ///
 /// The status line reports the reset as whole seconds and always the same ones,
@@ -1184,22 +1246,39 @@ mod tests {
         StatuslineInput::parse(&json).unwrap()
     }
 
-    /// The real failure this logic exists for: an idle Claude Code session
-    /// keeps repeating a stale reading every minute, so the newest row is not
-    /// the newest data.
+    /// The week Fable 5.1 shipped, Anthropic zeroed the counters with the
+    /// boundary left where it was: the scoped cap went 32 % → 0 % → 12 %. A
+    /// running maximum over the window showed 32 % for hours while the history
+    /// plot, drawn from the same rows, showed 12 %.
     #[test]
-    fn current_state_ignores_a_stale_session() {
+    fn a_counter_zeroed_inside_the_window_reads_at_its_new_level() {
         let db = Db::open_in_memory().unwrap();
 
-        db.record(&session_input("busy", 25.0, 59.0, 999), 100).unwrap();
-        // The idle session reports last, and reports much less.
-        db.record(&session_input("idle", 3.0, 57.0, 999), 200).unwrap();
-
-        assert_eq!(db.latest().unwrap().unwrap().five_pct, Some(3.0), "newest row is the stale one");
+        db.record(&session_input("a", 25.0, 32.0, 999), 100).unwrap();
+        db.record(&session_input("b", 3.0, 0.0, 999), 200).unwrap();
+        db.record(&session_input("a", 5.0, 12.0, 999), 300).unwrap();
 
         let current = db.current_sample().unwrap().unwrap();
-        assert_eq!(current.five_pct, Some(25.0), "the higher reading wins within a window");
-        assert_eq!(current.week_pct, Some(59.0));
+        assert_eq!(current.week_pct, Some(12.0), "the newest reading, not the highest");
+        assert_eq!(current.five_pct, Some(5.0));
+        assert_eq!(current.week_resets_at, Some(1020), "the window itself never moved");
+    }
+
+    /// The current state is assembled per window: a row that carries only one
+    /// of them must not blank the others.
+    #[test]
+    fn a_row_without_a_window_leaves_that_window_to_the_rows_that_have_it() {
+        let db = Db::open_in_memory().unwrap();
+        db.record(&session_input("a", 25.0, 40.0, 999), 100).unwrap();
+        let week_only = StatuslineInput::parse(
+            r#"{"session_id":"b","rate_limits":{"seven_day":{"used_percentage":41,"resets_at":999}}}"#,
+        )
+        .unwrap();
+        db.record(&week_only, 200).unwrap();
+
+        let current = db.current_sample().unwrap().unwrap();
+        assert_eq!(current.five_pct, Some(25.0));
+        assert_eq!(current.week_pct, Some(41.0));
     }
 
     #[test]
@@ -1276,14 +1355,14 @@ mod tests {
     }
 
     #[test]
-    fn overview_uses_the_authoritative_reading() {
+    fn overview_uses_the_newest_reading_of_each_window() {
         let db = Db::open_in_memory().unwrap();
-        db.record(&session_input("busy", 25.0, 59.0, 10_000_000), 100).unwrap();
-        db.record(&session_input("idle", 3.0, 57.0, 10_000_000), 200).unwrap();
+        db.record(&session_input("a", 25.0, 59.0, 10_000_000), 100).unwrap();
+        db.record(&session_input("b", 3.0, 1.0, 10_000_000), 200).unwrap();
 
         let overview = db.overview(300).unwrap();
-        assert_eq!(overview.five_hour.unwrap().used_pct, 25.0);
-        assert_eq!(overview.week.unwrap().used_pct, 59.0);
+        assert_eq!(overview.five_hour.unwrap().used_pct, 3.0);
+        assert_eq!(overview.week.unwrap().used_pct, 1.0);
     }
 
     #[test]
@@ -1330,6 +1409,39 @@ mod tests {
         assert_eq!(bounds[1].ts, 300);
     }
 
+    /// A reset leaves the boundary alone, so it cannot be told apart from the
+    /// window; measured across it, 30 % → 4 % would come out as a week being
+    /// un-spent.
+    #[test]
+    fn burn_endpoints_start_where_the_counter_was_zeroed() {
+        let db = Db::open_in_memory().unwrap();
+        db.record(&input(10.0, 20.0, 999), 100).unwrap();
+        db.record(&input(20.0, 30.0, 999), 200).unwrap();
+        db.record(&input(1.0, 0.0, 999), 300).unwrap();
+        db.record(&input(2.0, 4.0, 999), 400).unwrap();
+
+        let bounds = db.burn_endpoints().unwrap();
+        assert_eq!(bounds.len(), 2);
+        assert_eq!(bounds[0].ts, 300, "the first reading after the reset");
+        assert_eq!(bounds[1].ts, 400);
+    }
+
+    /// Concurrent sessions disagree by a point or two — the one whose last
+    /// reply is older reports slightly less. That is not a reset, and treating
+    /// it as one would cut the pace down to a two-minute span and zero the
+    /// daily baseline every time it happened.
+    #[test]
+    fn a_reading_a_point_behind_is_noise_not_a_reset() {
+        let db = Db::open_in_memory().unwrap();
+        db.record(&session_input("a", 10.0, 20.0, 999), 100).unwrap();
+        db.record(&session_input("a", 20.0, 30.0, 999), 200).unwrap();
+        db.record(&session_input("b", 30.0, 29.0, 999), 300).unwrap();
+
+        let bounds = db.burn_endpoints().unwrap();
+        assert_eq!(bounds[0].ts, 100, "the run is unbroken");
+        assert_eq!(bounds[1].ts, 300);
+    }
+
     /// A week that began at t=10_200, so the dates below sit inside it. The
     /// offset is a whole number of minutes because that is the grain
     /// boundaries are stored on.
@@ -1368,6 +1480,49 @@ mod tests {
         let (pct, estimated) = db.week_baseline(WEEK_RESETS, 30_000).unwrap().unwrap();
         assert!((pct - 20.0).abs() < 1e-6, "{pct}");
         assert!(estimated, "there was nothing to read it from");
+    }
+
+    /// The last reading before midnight says 20 %, but the counter was zeroed
+    /// since. Today started from that 20 % only on paper: what was spent
+    /// before the reset is off the meter, and the day's spending is what the
+    /// new run shows.
+    #[test]
+    fn baseline_is_zero_when_the_counter_was_zeroed_since_the_last_reading_before_midnight() {
+        let db = Db::open_in_memory().unwrap();
+        db.record(&input(10.0, 20.0, WEEK_RESETS), 20_000).unwrap();
+        db.record(&input(1.0, 0.0, WEEK_RESETS), 40_000).unwrap();
+        db.record(&input(2.0, 3.0, WEEK_RESETS), 50_000).unwrap();
+
+        let (pct, estimated) = db.week_baseline(WEEK_RESETS, 30_000).unwrap().unwrap();
+        assert_eq!(pct, 0.0);
+        assert!(estimated, "the reset may have fallen on either side of midnight");
+    }
+
+    #[test]
+    fn baseline_is_read_as_zero_when_the_reset_itself_came_after_midnight() {
+        let db = Db::open_in_memory().unwrap();
+        db.record(&input(10.0, 20.0, WEEK_RESETS), 20_000).unwrap();
+        // Still 20 % well after midnight, then zeroed: the reset was today.
+        db.record(&input(11.0, 21.0, WEEK_RESETS), 35_000).unwrap();
+        db.record(&input(1.0, 0.0, WEEK_RESETS), 40_000).unwrap();
+
+        let (pct, estimated) = db.week_baseline(WEEK_RESETS, 30_000).unwrap().unwrap();
+        assert_eq!(pct, 0.0);
+        assert!(!estimated);
+    }
+
+    /// The reading before midnight comes from the current run, so it stays the
+    /// baseline even though an older, higher one from before a reset exists.
+    #[test]
+    fn baseline_ignores_readings_from_before_a_reset() {
+        let db = Db::open_in_memory().unwrap();
+        db.record(&input(10.0, 50.0, WEEK_RESETS), 15_000).unwrap();
+        db.record(&input(1.0, 2.0, WEEK_RESETS), 20_000).unwrap();
+        db.record(&input(5.0, 9.0, WEEK_RESETS), 40_000).unwrap();
+
+        let (pct, estimated) = db.week_baseline(WEEK_RESETS, 30_000).unwrap().unwrap();
+        assert_eq!(pct, 2.0, "the 50 % belongs to the previous run");
+        assert!(!estimated);
     }
 
     #[test]

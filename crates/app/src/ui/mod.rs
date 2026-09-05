@@ -60,10 +60,19 @@ pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut UiState) -> 
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("⟳").on_hover_text(tr("ui.refresh_hint")).clicked() {
+                let hint = if state.config.probe.enabled {
+                    tr("ui.refresh_hint")
+                } else {
+                    tr("ui.refresh_hint_plain")
+                };
+                if ui.button("⟳").on_hover_text(hint).clicked() {
+                    state.request_probe();
                     refresh_requested = true;
                 }
-                if state.refreshed_at > 0 {
+                if state.probing() {
+                    ui.add(egui::Spinner::new().size(12.0));
+                    ui.label(egui::RichText::new(tr("ui.probing")).weak().small());
+                } else if state.refreshed_at > 0 {
                     let text =
                         tr_args("ui.refreshed_at", &[("time", &timefmt::clock(state.refreshed_at))]);
                     ui.label(egui::RichText::new(text).weak().small());

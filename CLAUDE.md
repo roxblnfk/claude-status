@@ -83,10 +83,16 @@ files a session by the directory it started in, so sessions begun in
 subdirectories split one checkout across a dozen entries — 44 "projects" where
 there were 16. `scan::project_of` walks up to the `.git`.
 
-**Samples are noisy by nature.** Several Claude Code sessions write at once, and
-an idle one keeps repeating what it last saw. Within one window (same
-`resets_at`) usage only ever grows, so the current value is the running maximum,
-not the newest row. Anything reading history has to respect that.
+**The counters get zeroed without the window moving.** Several Claude Code
+sessions write at once, so the newest row is only the newest state; per window,
+the current reading is the newest row inside the latest boundary
+(`Db::current_sample`). It used to be the running maximum, on the theory that an
+idle session replays stale, lower readings. The database disagrees: concurrent
+sessions differ by two points at most, while Anthropic zeroed the weekly
+counters twice in the week Fable 5.1 shipped, `resets_at` unchanged, and the
+maximum showed 32 % for hours against 12 % on the history plot. Anything reading
+history has to allow for a drop: the pace and the daily baseline run from the
+last reading more than `READING_NOISE_PCT` above the current one.
 
 ## Working on the GUI
 

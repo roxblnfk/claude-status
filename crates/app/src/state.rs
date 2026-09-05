@@ -147,6 +147,10 @@ pub struct AppState {
     probe: Arc<Mutex<ProbeSlot>>,
     /// Outcome of the last probe, for the settings screen.
     pub probe_message: Option<Result<String, String>>,
+    /// Whether the running probe was asked for by hand. A scheduled one that
+    /// fails reports on the settings page alone; one a person pressed a button
+    /// for answers in the window they pressed it in.
+    probe_requested: bool,
     /// Shared with the scan thread: counting hundreds of megabytes of logs
     /// takes seconds, and the window has to keep drawing.
     scan: Arc<Mutex<ScanSlot>>,
@@ -215,6 +219,7 @@ impl AppState {
             scoped_model: None,
             probe: Arc::new(Mutex::new(ProbeSlot::default())),
             probe_message: None,
+            probe_requested: false,
             scan: Arc::new(Mutex::new(ScanSlot::default())),
             scan_message: None,
             update: Arc::new(Mutex::new(UpdateStage::Idle)),
@@ -233,11 +238,17 @@ impl AppState {
         let now = timefmt::now();
         self.refreshed_at = now;
 
-        self.collect_probe();
+        let probe_failure = self.collect_probe();
         self.collect_scan();
         match self.reload(now) {
             Ok(()) => self.error = None,
             Err(e) => self.error = Some(format!("{e:#}")),
+        }
+        if let Some(message) = probe_failure {
+            self.error = Some(match self.error.take() {
+                Some(existing) => format!("{existing}; {message}"),
+                None => message,
+            });
         }
 
         self.install = install::status().unwrap_or(InstallStatus::Absent);
@@ -259,7 +270,7 @@ impl AppState {
         let (from, to) = self.period.bounds(now);
         self.history = db.samples_between(from, to)?;
 
-        // Deliberately not derived from `history`: the summary needs the peak
+        // Deliberately not derived from `history`: the summary needs the newest
         // reading of each window and the bounds of the weekly one, neither of
         // which a fixed time span is guaranteed to contain.
         self.overview = db.overview(now)?;
@@ -347,12 +358,40 @@ impl AppState {
         self.scan.lock().is_ok_and(|slot| slot.running)
     }
 
-    /// Picks up what the probe thread left behind.
-    fn collect_probe(&mut self) {
-        let Ok(mut slot) = self.probe.lock() else { return };
-        if let Some(outcome) = slot.outcome.take() {
-            self.probe_message = Some(outcome);
+    /// Picks up what the probe thread left behind. Returns the failure when
+    /// the probe was asked for by hand — the only case the window reports.
+    fn collect_probe(&mut self) -> Option<String> {
+        let Ok(mut slot) = self.probe.lock() else { return None };
+        let outcome = slot.outcome.take()?;
+        drop(slot);
+
+        let requested = std::mem::take(&mut self.probe_requested);
+        let failure = match (&outcome, requested) {
+            (Err(text), true) => Some(text.clone()),
+            _ => None,
+        };
+        self.probe_message = Some(outcome);
+        failure
+    }
+
+    /// Whether a finished probe is waiting to be read. Its rows are already in
+    /// the database; the tick would show them a minute from now, and the
+    /// person who pressed the button is watching.
+    pub fn probe_outcome_pending(&self) -> bool {
+        self.probe.lock().is_ok_and(|slot| slot.outcome.is_some())
+    }
+
+    /// The refresh button. Re-reading the database is instant, but the figures
+    /// in it are only as fresh as the last reply some session got, so the
+    /// button also asks Claude Code directly — unless the probe is switched
+    /// off: it costs seconds and a few hundred megabytes, and somebody who
+    /// turned it off did so on purpose.
+    pub fn request_probe(&mut self) {
+        if !self.config.probe.enabled {
+            return;
         }
+        self.probe_requested = true;
+        self.start_probe();
     }
 
     /// Starts a probe if the cheap source has stopped saying anything useful.
@@ -584,6 +623,7 @@ mod tests {
             scoped_model: None,
             probe: Arc::new(Mutex::new(ProbeSlot::default())),
             probe_message: None,
+            probe_requested: false,
             scan: Arc::new(Mutex::new(ScanSlot::default())),
             scan_message: None,
             update: Arc::new(Mutex::new(UpdateStage::Idle)),
