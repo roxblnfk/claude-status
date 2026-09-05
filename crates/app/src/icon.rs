@@ -118,7 +118,7 @@ mod tests {
     use super::*;
 
     fn opaque_pixels(icon: &Rgba) -> usize {
-        icon.data.chunks_exact(4).filter(|px| px[3] > 0).count()
+        icon.data.as_chunks::<4>().0.iter().filter(|px| px[3] > 0).count()
     }
 
     /// Gauge pixels: the track is grey, the progress is coloured. Counting
@@ -126,7 +126,7 @@ mod tests {
     /// the total painted area does not depend on the fill.
     fn coloured_pixels(icon: &Rgba) -> usize {
         icon.data
-            .chunks_exact(4)
+            .as_chunks::<4>().0.iter()
             .filter(|px| {
                 let (max, min) = (px[..3].iter().max(), px[..3].iter().min());
                 px[3] > 0 && max.zip(min).is_some_and(|(hi, lo)| hi - lo > 20)
