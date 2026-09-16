@@ -1,8 +1,19 @@
-# claude-status
+<p align="center">
+    <a href="#установка"><img alt="claude-status"
+         src="resources/logo-full.svg"
+         width="420"
+    /></a>
+</p>
 
-[![CI](https://img.shields.io/github/actions/workflow/status/roxblnfk/claude-status/ci.yml?branch=master&style=flat-square&label=CI&logo=github)](https://github.com/roxblnfk/claude-status/actions/workflows/ci.yml)
-[![Vibe Index](https://img.shields.io/static/v1?label=Vibe+Index&message=7.6&color=6d5ae7&style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI2ZmZiI%2BPHBhdGggZD0iTTkgNCBROSAxMyAxOCAxMyBROSAxMyA5IDIyIFE5IDEzIDAgMTMgUTkgMTMgOSA0IFoiLz48cGF0aCBkPSJNMTkgMSBRMTkgNiAyNCA2IFExOSA2IDE5IDExIFExOSA2IDE0IDYgUTE5IDYgMTkgMSBaIi8%2BPHBhdGggZD0iTTIwIDE0IFEyMCAxOCAyNCAxOCBRMjAgMTggMjAgMjIgUTIwIDE4IDE2IDE4IFEyMCAxOCAyMCAxNCBaIi8%2BPC9zdmc%2B)](https://github.com/roxblnfk/action-vibe-index)
-[![English readme](https://img.shields.io/badge/README-English%20%F0%9F%87%BA%F0%9F%87%B8-moccasin?style=flat-square)](README.md)
+<p align="center">Индикатор лимитов подписки Claude Code в трее — там, где их больше нигде не видно</p>
+
+<div align="center">
+
+[![CI](https://img.shields.io/github/actions/workflow/status/roxblnfk/claude-status/ci.yml?branch=master&style=flat-square&label=CI&logo=github)](https://github.com/roxblnfk/claude-status/actions/workflows/ci.yml) [![Vibe Index](https://img.shields.io/static/v1?label=Vibe+Index&message=7.6&color=6d5ae7&style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI2ZmZiI%2BPHBhdGggZD0iTTkgNCBROSAxMyAxOCAxMyBROSAxMyA5IDIyIFE5IDEzIDAgMTMgUTkgMTMgOSA0IFoiLz48cGF0aCBkPSJNMTkgMSBRMTkgNiAyNCA2IFExOSA2IDE5IDExIFExOSA2IDE0IDYgUTE5IDYgMTkgMSBaIi8%2BPHBhdGggZD0iTTIwIDE0IFEyMCAxOCAyNCAxOCBRMjAgMTggMjAgMjIgUTIwIDE4IDE2IDE4IFEyMCAxOCAyMCAxNCBaIi8%2BPC9zdmc%2B)](https://github.com/roxblnfk/action-vibe-index) [![English readme](https://img.shields.io/badge/README-English%20%F0%9F%87%BA%F0%9F%87%B8-moccasin?style=flat-square)](README.md)
+
+</div>
+
+<br />
 
 Claude Code никак не сообщает, насколько быстро расходуются лимиты подписки, —
 пока один из них не остановит работу. Эта программа за ними следит.

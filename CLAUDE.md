@@ -185,3 +185,20 @@ fetches that, so the asset naming in `.github/workflows/release.yml` and
   or the button, do not edit it.
 - The README is for users. Design rationale, subcommand tables and the release
   process do not belong there.
+
+## The logo
+
+`resources/logo.svg` is the mark, `resources/logo-full.svg` the same mark with
+the name beside it. Both are generated rather than drawn: the rings use the
+constants and the colour stops of `crates/app/src/ui/rings.rs`, so the logo is
+the plaque itself at a fixed set of readings. Change the geometry there and the
+two drift apart.
+
+Two things the files cannot say for themselves. SVG has no conic gradient, so
+every arc is cut into 30° pieces with a linear gradient along each chord, and
+each piece but the last runs half a degree into its neighbour — butt ends
+meeting at one angle leave a hairline of the track showing between them. And the
+name is outlines, not `<text>`: a `font-family` in an SVG is a request the viewer
+may decline, and the fallback would be a different logo. It is JetBrains Mono
+Bold, an OFL face, converted by `usvg` with the `text` feature — which is what
+rewording it takes again.
