@@ -43,6 +43,7 @@ pub struct Config {
     pub budget: BudgetConfig,
     pub storage: StorageConfig,
     pub tray: TrayConfig,
+    pub compact: CompactConfig,
     pub ui: UiConfig,
     pub probe: ProbeConfig,
     pub debug: DebugConfig,
@@ -84,6 +85,16 @@ pub struct StorageConfig {
 pub struct TrayConfig {
     /// How often the GUI re-reads the database, in seconds.
     pub refresh_secs: u64,
+}
+
+/// The compact plaque: a square of gauge rings that floats above everything.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct CompactConfig {
+    /// Side of the plaque in ui points.
+    pub size: f32,
+    /// How opaque the plaque is while the focus is elsewhere, 0..1.
+    pub inactive_opacity: f32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
@@ -157,6 +168,12 @@ impl Default for TrayConfig {
     }
 }
 
+impl Default for CompactConfig {
+    fn default() -> Self {
+        Self { size: 180.0, inactive_opacity: 0.55 }
+    }
+}
+
 impl Default for ProbeConfig {
     fn default() -> Self {
         Self { enabled: true, interval_secs: 900, fresh_secs: 300 }
@@ -167,6 +184,26 @@ impl ProbeConfig {
     /// The interval actually used, whatever the file says.
     pub fn interval_secs(&self) -> u64 {
         self.interval_secs.max(MIN_PROBE_INTERVAL_SECS)
+    }
+}
+
+/// Below this the four rings stop being separable.
+pub const MIN_COMPACT_SIZE: f32 = 120.0;
+
+impl CompactConfig {
+    /// The side actually used, whatever the file says.
+    pub fn size(&self) -> f32 {
+        if self.size.is_finite() { self.size.clamp(MIN_COMPACT_SIZE, 800.0) } else { 180.0 }
+    }
+
+    /// The opacity actually used. Fully transparent would leave nothing on
+    /// screen to click the plaque back with.
+    pub fn inactive_opacity(&self) -> f32 {
+        if self.inactive_opacity.is_finite() {
+            self.inactive_opacity.clamp(0.15, 1.0)
+        } else {
+            0.55
+        }
     }
 }
 

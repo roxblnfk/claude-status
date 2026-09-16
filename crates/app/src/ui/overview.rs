@@ -7,7 +7,7 @@ use claude_status_core::{
 use eframe::egui;
 
 use crate::state::AppState;
-use crate::ui::{Tab, level_color};
+use crate::ui::{Tab, level_color, scoped_color};
 
 /// Returns the tab the user asked to switch to.
 pub fn draw(ui: &mut egui::Ui, state: &AppState) -> Option<Tab> {
@@ -19,7 +19,7 @@ pub fn draw(ui: &mut egui::Ui, state: &AppState) -> Option<Tab> {
 
     egui::ScrollArea::vertical().show(ui, |ui| {
         if let Some(w) = state.overview.five_hour {
-            window_card(ui, &tr("overview.card.five_hour"), &w, true);
+            window_card(ui, &tr("overview.card.five_hour"), &w, true, level_color);
             ui.add_space(8.0);
         }
         // The same reading the inner ring of the tray icon carries: how much of
@@ -31,7 +31,7 @@ pub fn draw(ui: &mut egui::Ui, state: &AppState) -> Option<Tab> {
             ui.add_space(8.0);
         }
         if let Some(w) = state.overview.week {
-            window_card(ui, &tr("overview.card.week"), &w, false);
+            window_card(ui, &tr("overview.card.week"), &w, false, level_color);
             ui.add_space(8.0);
         }
         if let Some(w) = state.overview.week_opus {
@@ -41,7 +41,7 @@ pub fn draw(ui: &mut egui::Ui, state: &AppState) -> Option<Tab> {
                 Some(model) => tr_args("overview.card.week_scoped", &[("model", model)]),
                 None => tr("overview.card.week_opus"),
             };
-            window_card(ui, &title, &w, false);
+            window_card(ui, &title, &w, false, scoped_color);
             ui.add_space(8.0);
         }
 
@@ -91,7 +91,16 @@ fn no_data(ui: &mut egui::Ui, state: &AppState) -> Option<Tab> {
 }
 
 /// A card for one limit window.
-fn window_card(ui: &mut egui::Ui, title: &str, w: &WindowState, short_window: bool) {
+///
+/// `fill` is what the bar is coloured by: the shared budget speaks one set of
+/// colours, the model-scoped cap another.
+fn window_card(
+    ui: &mut egui::Ui,
+    title: &str,
+    w: &WindowState,
+    short_window: bool,
+    fill: fn(f64) -> egui::Color32,
+) {
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_width(ui.available_width());
 
@@ -137,7 +146,7 @@ fn window_card(ui: &mut egui::Ui, title: &str, w: &WindowState, short_window: bo
             return;
         };
 
-        usage_bar(ui, used_pct, w);
+        usage_bar(ui, used_pct, w, fill);
 
         // The even-pace line only makes sense for the weekly window: over five
         // hours a burst of work is normal rather than overspending.
@@ -173,9 +182,9 @@ fn window_card(ui: &mut egui::Ui, title: &str, w: &WindowState, short_window: bo
 }
 
 /// The usage bar.
-fn usage_bar(ui: &mut egui::Ui, used_pct: f64, w: &WindowState) {
+fn usage_bar(ui: &mut egui::Ui, used_pct: f64, w: &WindowState, fill: fn(f64) -> egui::Color32) {
     let fraction = (used_pct / 100.0).clamp(0.0, 1.0) as f32;
-    let bar = ui.add(egui::ProgressBar::new(fraction).fill(level_color(used_pct)));
+    let bar = ui.add(egui::ProgressBar::new(fraction).fill(fill(used_pct)));
     let rect = bar.rect;
     let filled = (rect.width() * fraction).max(rect.height());
 

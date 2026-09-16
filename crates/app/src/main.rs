@@ -42,6 +42,10 @@ fn main() -> Result<()> {
     }
 }
 
+/// The floor the normal window may be resized to. The plaque sets its own and
+/// has to put this one back.
+pub const MIN_WINDOW_SIZE: [f32; 2] = [460.0, 320.0];
+
 fn run_gui(hidden: bool) -> Result<()> {
     // The image an update displaced cannot be deleted while it is running; by
     // now it is not.
@@ -52,7 +56,11 @@ fn run_gui(hidden: bool) -> Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_title(tr("ui.window_title"))
             .with_inner_size([720.0, 560.0])
-            .with_min_inner_size([460.0, 320.0])
+            .with_min_inner_size(MIN_WINDOW_SIZE)
+            // For the compact plaque, which is a frameless square of rings with
+            // nothing behind them. Windows only wires up the alpha channel when
+            // the window is created this way, so it cannot wait for the switch.
+            .with_transparent(true)
             // Started by the session: the icon appears, the window does not.
             .with_visible(!hidden),
         ..Default::default()
@@ -188,6 +196,16 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if ui::draw(ui, &mut self.state, &mut self.ui_state) {
             self.refresh();
+        }
+    }
+
+    /// The plaque has no background of its own: everything outside the rings is
+    /// whatever it is floating over.
+    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
+        if self.ui_state.compact.active {
+            egui::Color32::TRANSPARENT.to_normalized_gamma_f32()
+        } else {
+            visuals.window_fill().to_normalized_gamma_f32()
         }
     }
 }
