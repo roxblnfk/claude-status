@@ -124,7 +124,9 @@ impl App {
         // Waking the paint loop: without it a click on the icon would go
         // unhandled while the window is hidden.
         let wake_ctx = ctx.clone();
-        match Tray::new(&self.state, move || wake_ctx.request_repaint()) {
+        match Tray::new(&self.state, self.ui_state.compact.active, move || {
+            wake_ctx.request_repaint()
+        }) {
             Ok(tray) => self.tray = Some(tray),
             Err(e) => {
                 let message = tray::unavailable_message(&e);
@@ -143,7 +145,7 @@ impl App {
         self.state.refresh();
         self.last_refresh = Instant::now();
         if let Some(tray) = &mut self.tray
-            && let Err(e) = tray.update(&self.state)
+            && let Err(e) = tray.update(&self.state, self.ui_state.compact.active)
         {
             self.state.error = Some(tr_args("error.icon_update", &[("error", &format!("{e:#}"))]));
         }
@@ -268,6 +270,12 @@ impl eframe::App for App {
         for action in actions {
             match action {
                 TrayAction::Show => self.show_window(ctx),
+                TrayAction::FullWindow => {
+                    if self.ui_state.compact.active {
+                        self.ui_state.compact.leave(ctx);
+                    }
+                    self.show_window(ctx);
+                }
                 TrayAction::Refresh => {
                     self.state.request_probe();
                     self.refresh();

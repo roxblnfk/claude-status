@@ -19,8 +19,10 @@ type Queue = Arc<Mutex<VecDeque<TrayAction>>>;
 /// What the user did with the icon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayAction {
-    /// Show the window and bring it to the front.
+    /// Show whatever shape the program is in and bring it to the front.
     Show,
+    /// Put the plaque away and show the full window.
+    FullWindow,
     /// Re-read the database right now.
     Refresh,
     Quit,
@@ -32,6 +34,9 @@ pub struct Tray {
     /// The last rendered state, so the system is not poked for nothing.
     drawn: Option<(i64, i64)>,
     tooltip: String,
+    /// Held so the item can be greyed out while the window is already a window.
+    full_window: MenuItem,
+    unfoldable: bool,
 }
 
 impl Tray {
@@ -40,13 +45,19 @@ impl Tray {
     /// `wake` is called from the event handler thread when the user touches the
     /// icon: the window may be hidden by then, and without waking the paint
     /// loop the click would go unnoticed.
-    pub fn new(state: &AppState, wake: impl Fn() + Send + Sync + 'static) -> Result<Self> {
+    pub fn new(
+        state: &AppState,
+        compact: bool,
+        wake: impl Fn() + Send + Sync + 'static,
+    ) -> Result<Self> {
         let menu = Menu::new();
         let show = MenuItem::new(tr("tray.menu.show"), true, None);
+        let full_window = MenuItem::new(tr("tray.menu.full_window"), compact, None);
         let refresh = MenuItem::new(tr("tray.menu.refresh"), true, None);
         let quit = MenuItem::new(tr("tray.menu.quit"), true, None);
 
         menu.append(&show)?;
+        menu.append(&full_window)?;
         menu.append(&refresh)?;
         menu.append(&PredefinedMenuItem::separator())?;
         menu.append(&quit)?;
@@ -68,13 +79,19 @@ impl Tray {
         let queue: Queue = Arc::default();
         let wake = Arc::new(wake);
 
-        let (show_id, refresh_id, quit_id) =
-            (show.id().clone(), refresh.id().clone(), quit.id().clone());
+        let (show_id, unfold_id, refresh_id, quit_id) = (
+            show.id().clone(),
+            full_window.id().clone(),
+            refresh.id().clone(),
+            quit.id().clone(),
+        );
         let menu_queue = Arc::clone(&queue);
         let menu_wake = Arc::clone(&wake);
         MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
             let action = if event.id == show_id {
                 TrayAction::Show
+            } else if event.id == unfold_id {
+                TrayAction::FullWindow
             } else if event.id == refresh_id {
                 TrayAction::Refresh
             } else if event.id == quit_id {
@@ -95,13 +112,22 @@ impl Tray {
             }
         }));
 
-        let mut tray = Self { icon, queue, drawn: None, tooltip };
-        tray.update(state)?;
+        let mut tray =
+            Self { icon, queue, drawn: None, tooltip, full_window, unfoldable: compact };
+        tray.update(state, compact)?;
         Ok(tray)
     }
 
     /// Redraws the icon and the tooltip when the data has changed.
-    pub fn update(&mut self, state: &AppState) -> Result<()> {
+    ///
+    /// `compact` is whether the plaque is what is on screen — the one thing the
+    /// menu offers that the window itself cannot.
+    pub fn update(&mut self, state: &AppState, compact: bool) -> Result<()> {
+        if self.unfoldable != compact {
+            self.full_window.set_enabled(compact);
+            self.unfoldable = compact;
+        }
+
         let ring = state.session_gauge();
         let dot = state.daily_gauge();
 

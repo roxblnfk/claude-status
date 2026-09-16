@@ -463,6 +463,9 @@ tray:
     show:
       en: Show statistics
       ru: Показать статистику
+    full_window:
+      en: Unfold into the window
+      ru: Развернуть в окно
     refresh:
       en: Refresh
       ru: Обновить
