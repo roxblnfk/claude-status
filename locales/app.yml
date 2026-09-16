@@ -72,6 +72,12 @@ error:
   build_icon:
     en: could not build an icon from RGBA
     ru: не удалось построить иконку из RGBA
+  window_handle:
+    en: could not get a handle on the application window
+    ru: не удалось получить дескриптор окна приложения
+  taskbar:
+    en: "could not change the taskbar entry: %{error}"
+    ru: "не удалось изменить кнопку в панели задач: %{error}"
   create_tray:
     en: could not create the tray icon
     ru: не удалось создать иконку в трее
@@ -457,6 +463,9 @@ tray:
     show:
       en: Show statistics
       ru: Показать статистику
+    full_window:
+      en: Unfold into the window
+      ru: Развернуть в окно
     refresh:
       en: Refresh
       ru: Обновить
@@ -488,6 +497,36 @@ tray:
     stale:
       en: "data is %{age} old"
       ru: "данные %{age} назад"
+
+compact:
+  enter:
+    en: Compact panel — the gauges alone, above all other windows
+    ru: Компактная плашка — только индикаторы, поверх всех окон
+  restore:
+    en: Full window (double click or Esc)
+    ru: Обычное окно (двойной клик или Esc)
+  drag:
+    en: Drag to move
+    ru: Тяните, чтобы переместить
+  ring:
+    session:
+      en: 5h
+      ru: 5ч
+    today:
+      en: Today
+      ru: Сегодня
+    week:
+      en: Week
+      ru: Неделя
+    scoped:
+      en: Model
+      ru: Модель
+    value:
+      en: "%{title} %{pct}%"
+      ru: "%{title} %{pct}%"
+    expired:
+      en: "%{title} —"
+      ru: "%{title} —"
 
 ui:
   window_title:
@@ -1173,6 +1212,25 @@ settings:
     refresh:
       en: "Refresh every:"
       ru: "Обновлять каждые:"
+  compact:
+    title:
+      en: Compact panel
+      ru: Компактная плашка
+    explanation:
+      en: >-
+        A square of gauge rings above all other windows: the 5-hour session
+        outermost, then today's ration, the week, and the per-model cap in its
+        own colours. The ◎ button next to the refresh one opens it.
+      ru: >-
+        Квадрат из колец поверх всех окон: снаружи пятичасовая сессия, затем
+        норма на сегодня, неделя и лимит по модели — своим цветом. Открывается
+        кнопкой ◎ рядом с обновлением.
+    opacity:
+      en: "Opacity while inactive:"
+      ru: "Непрозрачность без фокуса:"
+    open:
+      en: Open the panel
+      ru: Открыть плашку
   update:
     title:
       en: Version

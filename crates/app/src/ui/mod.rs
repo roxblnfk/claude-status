@@ -1,12 +1,14 @@
 //! The statistics window.
 
+pub mod compact;
 pub mod history;
 mod model_override;
 mod models;
 mod overview;
+pub mod rings;
 mod settings;
 
-use claude_status_core::{timefmt, tr, tr_args};
+use claude_status_core::{Config, timefmt, tr, tr_args};
 use eframe::egui;
 
 use crate::state::{AppState, Period, Range};
@@ -33,15 +35,25 @@ impl Tab {
 }
 
 /// Widget state that survives between frames.
-#[derive(Default)]
 pub struct UiState {
     pub tab: Option<Tab>,
+    /// The plaque, and the window geometry it will hand back.
+    pub compact: compact::Compact,
     pub settings: settings::SettingsState,
     /// Which breakdown the models tab is showing.
     pub breakdown: models::Breakdown,
 }
 
 impl UiState {
+    pub fn new(config: &Config) -> Self {
+        Self {
+            tab: None,
+            compact: compact::Compact::new(&config.compact),
+            settings: settings::SettingsState::default(),
+            breakdown: models::Breakdown::default(),
+        }
+    }
+
     fn tab(&mut self) -> Tab {
         *self.tab.get_or_insert(Tab::Overview)
     }
@@ -49,6 +61,14 @@ impl UiState {
 
 /// Draws the whole window. Returns `true` when the state should be re-read.
 pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut UiState) -> bool {
+    if ui_state.compact.active {
+        let action = compact::draw(ui, state, &mut ui_state.compact);
+        if action.leave {
+            ui_state.compact.leave(ui.ctx());
+        }
+        return action.refresh;
+    }
+
     let mut refresh_requested = false;
     let mut active = ui_state.tab();
 
@@ -60,6 +80,12 @@ pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut UiState) -> 
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // The window is decorated by the system, so the row of
+                // minimise/maximise/close is out of reach; this is the nearest
+                // thing to it that belongs to us.
+                if ui.button("◎").on_hover_text(tr("compact.enter")).clicked() {
+                    ui_state.compact.enter(ui.ctx());
+                }
                 let hint = if state.config.probe.enabled {
                     tr("ui.refresh_hint")
                 } else {
@@ -92,13 +118,17 @@ pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut UiState) -> 
     // A tab may ask to switch to another one — for example the "register the
     // hook" button on an empty overview.
     let mut goto = None;
+    let mut open_compact = false;
     egui::CentralPanel::default().show(ui, |ui| match active {
         Tab::Overview => goto = overview::draw(ui, state),
         Tab::History => history::draw(ui, state),
         Tab::Models => models::draw(ui, state, &mut ui_state.breakdown),
-        Tab::Settings => settings::draw(ui, state, &mut ui_state.settings),
+        Tab::Settings => open_compact = settings::draw(ui, state, &mut ui_state.settings),
     });
 
+    if open_compact {
+        ui_state.compact.enter(ui.ctx());
+    }
     ui_state.tab = Some(goto.unwrap_or(active));
     refresh_requested
 }
@@ -165,6 +195,13 @@ pub fn level_color(pct: f64) -> egui::Color32 {
     }
 }
 
+/// The same for the model-scoped cap. The plaque gives it a palette of its own
+/// so it is not read as part of the budget the other three rings share, and the
+/// bar on the overview has to speak the same colours.
+pub fn scoped_color(pct: f64) -> egui::Color32 {
+    rings::color_at(rings::Palette::Scoped, (pct / 100.0) as f32)
+}
+
 /// Compact notation for large token counts: `1.2M`, `340k`.
 pub fn human_tokens(tokens: i64) -> String {
     let abs = tokens.unsigned_abs();
@@ -180,6 +217,18 @@ pub fn human_tokens(tokens: i64) -> String {
 mod tests {
     use super::*;
     use claude_status_core::{Language, i18n};
+
+    /// `bar_label` writes the reading onto the fill in dark ink, so every colour
+    /// a bar may take has to stay light enough to read it against.
+    #[test]
+    fn the_scoped_bar_stays_light_and_apart_from_the_shared_budget() {
+        for pct in [0.0, 25.0, 50.0, 60.0, 75.0, 100.0] {
+            let c = scoped_color(pct);
+            let luma = 0.299 * c.r() as f32 + 0.587 * c.g() as f32 + 0.114 * c.b() as f32;
+            assert!(luma > 130.0, "{pct}% is too dark to write on: {c:?}, luma {luma:.0}");
+            assert_ne!(c, level_color(pct), "the scoped cap must not read as the week");
+        }
+    }
 
     #[test]
     fn human_tokens_switches_units() {

@@ -60,6 +60,16 @@ session starts on and the one subagents run on. Which models your plan may run i
 known only to Claude Code, so nothing there is verified — a name it does not
 accept shows up as a session that refuses to start.
 
+The ◎ button beside the refresh one folds the window into a square panel that
+floats above everything else: four rings — the five-hour session, today's
+ration, the week, and the per-model cap in its own colours. Each carries the
+same tick the bars do, marking where an even pace would have got to by now, and
+a ration spent past its allowance carries on into a second lap. Drag the panel
+anywhere, pull an edge to resize it, and double-click it or press Esc to get the
+window back. Both the panel and the window open where they were last left, at
+the size they were last given. How faint the panel goes while the focus is
+elsewhere is set under **Settings → Program**.
+
 The status line template is edited in the window, with a live preview, ready
 presets and the list of placeholders.
 

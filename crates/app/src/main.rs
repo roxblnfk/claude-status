@@ -7,7 +7,9 @@
 mod cli;
 mod hook;
 mod icon;
+mod screen;
 mod state;
+mod taskbar;
 mod tray;
 mod ui;
 
@@ -29,7 +31,7 @@ fn main() -> Result<()> {
     let config = Config::load_and_apply_language();
 
     match cli::parse(std::env::args().skip(1))? {
-        cli::Command::Gui { hidden } => run_gui(hidden),
+        cli::Command::Gui { hidden } => run_gui(hidden, &config),
         // Handed the configuration already read: this runs on every assistant
         // message, so a second read of the same file is worth avoiding. It
         // reports nothing upwards either — a hook that exits non-zero would
@@ -42,22 +44,31 @@ fn main() -> Result<()> {
     }
 }
 
-fn run_gui(hidden: bool) -> Result<()> {
+/// The floor the normal window may be resized to. The plaque sets its own and
+/// has to put this one back.
+pub const MIN_WINDOW_SIZE: [f32; 2] = [460.0, 320.0];
+
+/// What the window opens at before it has been sized by hand.
+const DEFAULT_WINDOW_SIZE: [f32; 2] = [720.0, 560.0];
+
+fn run_gui(hidden: bool, config: &Config) -> Result<()> {
     // The image an update displaced cannot be deleted while it is running; by
     // now it is not.
     update::clean_leftovers();
     tray::init_platform()?;
 
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title(tr("ui.window_title"))
-            .with_inner_size([720.0, 560.0])
-            .with_min_inner_size([460.0, 320.0])
-            // Started by the session: the icon appears, the window does not.
-            .with_visible(!hidden),
-        ..Default::default()
-    };
-
+    let size = config.window.size().map_or(DEFAULT_WINDOW_SIZE, |(w, h)| [w, h]);
+    let viewport = egui::ViewportBuilder::default()
+        .with_title(tr("ui.window_title"))
+        .with_inner_size(size)
+        .with_min_inner_size(MIN_WINDOW_SIZE)
+        // For the compact plaque, which is a frameless square of rings with
+        // nothing behind them. Windows only wires up the alpha channel when
+        // the window is created this way, so it cannot wait for the switch.
+        .with_transparent(true)
+        // Started by the session: the icon appears, the window does not.
+        .with_visible(!hidden);
+    let options = eframe::NativeOptions { viewport, ..Default::default() };
     eframe::run_native("claude-status", options, Box::new(move |cc| Ok(Box::new(App::new(cc, hidden)))))
         .map_err(|e| anyhow::anyhow!(tr_args("error.run_gui", &[("error", &e.to_string())])))
 }
@@ -74,18 +85,35 @@ struct App {
     /// Spent on the first frame: `with_visible(false)` alone is not enough,
     /// eframe shows the window once it has something to draw.
     hide_on_start: bool,
+    /// Whether the taskbar lists the window. The plaque takes its place there,
+    /// and showing the window again puts it back whatever we asked for.
+    on_taskbar: bool,
+    /// Where the window stood last frame — the position in pixels, the size in
+    /// points. Read as the frames go by because the viewport is gone by the
+    /// time there is anything to write it to.
+    geometry: Option<([f32; 2], egui::Vec2)>,
+    /// The position the configuration remembers, until the first frame has
+    /// moved the window there. The viewport builder cannot do it: it takes a
+    /// position in points, and which pixel that lands on is settled by the
+    /// display the window happens to open on.
+    place_at: Option<[f32; 2]>,
 }
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>, hidden: bool) -> Self {
         setup_fonts(&cc.egui_ctx);
+        let state = AppState::load();
+        let place_at = state.config.window.position().map(|(x, y)| [x, y]);
         Self {
-            state: AppState::load(),
-            ui_state: UiState::default(),
+            ui_state: UiState::new(&state.config),
+            state,
             tray: None,
             last_refresh: Instant::now(),
             quitting: false,
             hide_on_start: hidden,
+            on_taskbar: true,
+            geometry: None,
+            place_at,
         }
     }
 
@@ -96,7 +124,9 @@ impl App {
         // Waking the paint loop: without it a click on the icon would go
         // unhandled while the window is hidden.
         let wake_ctx = ctx.clone();
-        match Tray::new(&self.state, move || wake_ctx.request_repaint()) {
+        match Tray::new(&self.state, self.ui_state.compact.active, move || {
+            wake_ctx.request_repaint()
+        }) {
             Ok(tray) => self.tray = Some(tray),
             Err(e) => {
                 let message = tray::unavailable_message(&e);
@@ -115,15 +145,105 @@ impl App {
         self.state.refresh();
         self.last_refresh = Instant::now();
         if let Some(tray) = &mut self.tray
-            && let Err(e) = tray.update(&self.state)
+            && let Err(e) = tray.update(&self.state, self.ui_state.compact.active)
         {
             self.state.error = Some(tr_args("error.icon_update", &[("error", &format!("{e:#}"))]));
         }
     }
 
-    fn show_window(&self, ctx: &egui::Context) {
+    fn show_window(&mut self, ctx: &egui::Context) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        // A window left on a monitor that has since gone cannot be dragged
+        // back — there is nothing on screen to take hold of. Asking the tray
+        // for it is the way out.
+        let per_point = ctx.pixels_per_point();
+        if let Some((at, size)) = self.geometry
+            && !screen::is_on_a_monitor(at, [size.x * per_point, size.y * per_point])
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(screen::to_points(
+                screen::FALLBACK_POSITION,
+                per_point,
+            )));
+        }
+        // Showing a window puts it back on the taskbar; if the plaque is what is
+        // coming back, the next tick has to take it off again.
+        self.on_taskbar = true;
+    }
+
+    /// Notes where the window stands, unless it is minimised — a minimised
+    /// window reports a position off the screen that it must not come back to.
+    fn track_geometry(&mut self, ctx: &egui::Context) {
+        let per_point = ctx.pixels_per_point();
+        if let Some(geometry) = ctx.input(|i| {
+            let viewport = i.viewport();
+            (viewport.minimized != Some(true))
+                .then(|| {
+                    let position = screen::to_pixels(viewport.outer_rect?.min, per_point);
+                    Some((position, viewport.inner_rect?.size()))
+                })
+                .flatten()
+        }) {
+            self.geometry = Some(geometry);
+        }
+    }
+
+    /// Moves the window to where the last session left it.
+    ///
+    /// Spent on the first frame, once there is a scale factor to read the
+    /// stored pixels against. A monitor that has gone since takes its
+    /// coordinates with it, and the window is left wherever it opened.
+    fn place_on_start(&mut self, ctx: &egui::Context) {
+        // The size is read first: without it there is nothing to check the
+        // position against, and the request has to wait for a later frame.
+        let Some((_, size)) = self.geometry else { return };
+        let Some(at) = self.place_at.take() else { return };
+        let per_point = ctx.pixels_per_point();
+        if screen::is_on_a_monitor(at, [size.x * per_point, size.y * per_point]) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(screen::to_points(
+                at, per_point,
+            )));
+        }
+    }
+
+    /// Stores where the window and the plaque were left, for the next launch.
+    ///
+    /// Only one of the two is on screen, so the other's place comes from what
+    /// the plaque kept when it swapped them over.
+    fn save_geometry(&mut self) {
+        let Some((position, size)) = self.geometry else { return };
+        let (plaque_at, plaque_side) = self.ui_state.compact.plaque();
+        let config = &mut self.state.config;
+
+        if self.ui_state.compact.active {
+            (config.compact.x, config.compact.y) = (Some(position[0]), Some(position[1]));
+            config.compact.size = size.x.min(size.y);
+            if let Some((at, size)) = self.ui_state.compact.window() {
+                config.window.set((at[0], at[1]), (size.x, size.y));
+            }
+        } else {
+            config.window.set((position[0], position[1]), (size.x, size.y));
+            config.compact.size = plaque_side;
+            if let Some(at) = plaque_at {
+                (config.compact.x, config.compact.y) = (Some(at[0]), Some(at[1]));
+            }
+        }
+
+        // Nothing is left on screen to report a failure to, and a window that
+        // opens in the wrong place is not worth holding up the exit for.
+        let _ = config.save();
+    }
+
+    /// Keeps the taskbar in step with which shape the window is in.
+    fn sync_taskbar(&mut self, frame: &eframe::Frame) {
+        let listed = !self.ui_state.compact.active;
+        if self.on_taskbar == listed {
+            return;
+        }
+        self.on_taskbar = listed;
+        if let Err(e) = taskbar::set_listed(frame, listed) {
+            self.state.error = Some(tr_args("error.taskbar", &[("error", &format!("{e:#}"))]));
+        }
     }
 }
 
@@ -134,9 +254,12 @@ impl eframe::App for App {
     /// somebody requested a repaint — `ui` is not called at all in that case.
     /// So the tray and the data refresh live here: an application minimised to
     /// the tray must keep working.
-    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         tray::pump_platform_events();
         self.ensure_tray(ctx);
+        self.sync_taskbar(frame);
+        self.track_geometry(ctx);
+        self.place_on_start(ctx);
 
         if self.hide_on_start {
             self.hide_on_start = false;
@@ -147,6 +270,12 @@ impl eframe::App for App {
         for action in actions {
             match action {
                 TrayAction::Show => self.show_window(ctx),
+                TrayAction::FullWindow => {
+                    if self.ui_state.compact.active {
+                        self.ui_state.compact.leave(ctx);
+                    }
+                    self.show_window(ctx);
+                }
                 TrayAction::Refresh => {
                     self.state.request_probe();
                     self.refresh();
@@ -188,6 +317,20 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if ui::draw(ui, &mut self.state, &mut self.ui_state) {
             self.refresh();
+        }
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.save_geometry();
+    }
+
+    /// The plaque has no background of its own: everything outside the rings is
+    /// whatever it is floating over.
+    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
+        if self.ui_state.compact.active {
+            egui::Color32::TRANSPARENT.to_normalized_gamma_f32()
+        } else {
+            visuals.window_fill().to_normalized_gamma_f32()
         }
     }
 }

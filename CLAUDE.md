@@ -32,6 +32,35 @@ nothing to a terminal — no console is attached — but work fine when stdout i
 piped, which is how Claude Code runs the hook. Debug builds have a console, so
 this only bites on release.
 
+**The window is drawn by glow, not wgpu.** The compact plaque is a frameless
+square with nothing behind the outer ring, and that needs a window whose alpha
+channel reaches the compositor. On Windows a DXGI swap chain offers no
+`CompositeAlphaMode` with transparency — `egui-wgpu` says as much in a warning
+and falls back to opaque, which showed as a black square. The OpenGL path does
+it, so `eframe` is pulled with `default-features = false` and `glow`.
+`with_transparent(true)` also has to be set at creation: winit's runtime
+`set_transparent` only flips a flag on Windows, and the blur-behind that wires
+up the alpha is applied once, when the window is made.
+
+**A position in ui points is only a position on one monitor.** egui reports
+`outer_rect` as pixels divided by the window's scale factor and multiplies
+`ViewportCommand::OuterPosition` back by the same, so a position read on a
+150 % display and applied while the window sits on a 100 % one lands half as
+far out again — remembering the window across a restart put it 750 px away the
+first time. `crate::screen` keeps positions in pixels and converts at the egui
+boundary; sizes stay in points, where the same number is the same apparent size
+on either display.
+
+**The viewport builder cannot place a window by pixel.** It takes points, and
+winit multiplies them by the scale factor of whichever display the window
+happens to open on — not the one the position belongs to. The restore is sent
+as a viewport command on the first frame instead, where the factor is known.
+
+**`WindowLevel(AlwaysOnTop)` is applied only when it changes.** winit calls
+`SetWindowPos` from the diff of its own flags, so sending the same level again
+is a no-op — if anything outside the process clears `WS_EX_TOPMOST`, the plaque
+stays demoted and re-asserting will not bring it back.
+
 **Editing `locales/app.yml` may appear to do nothing.** `rust_i18n::i18n!` reads
 it inside a proc macro, invisible to Cargo. `crates/core/build.rs` declares
 `rerun-if-changed` on it; without that the change waits for an unrelated
@@ -100,9 +129,14 @@ egui draws immediately, so a change is only real once seen. The way used all
 session: temporarily point `UiState::tab()` at the tab under test, build, launch,
 and screenshot the window from PowerShell — find the top-level window of the
 `claude-status` process whose class is `Window Class`, `GetWindowRect`,
-`CopyFromScreen`. Clicking works through `SetCursorPos` + `mouse_event`, but
-coordinates go through DPI virtualisation, so read them off the captured image
-rather than from `GetWindowRect`. Revert the tab default afterwards.
+`CopyFromScreen`. Clicking works through `SetCursorPos` + `mouse_event`. Call
+`SetThreadDpiAwarenessContext(-4)` first: PowerShell is DPI-unaware, so without
+it `GetWindowRect` answers in virtualised points while `CopyFromScreen` reads
+physical pixels, and every capture lands somewhere else on the screen. Raising
+the window over the others takes `SetWindowPos(HWND_TOPMOST)` —
+`SetForegroundWindow` is refused from a background shell — and putting it back
+with `HWND_NOTOPMOST` afterwards is what silently breaks a plaque that is
+supposed to float. Revert the tab default afterwards.
 
 An `egui::Grid` column takes the width of its widest cell, which sounds fine
 until the widest cell is a short label: the column collapses and the others wrap

@@ -43,6 +43,8 @@ pub struct Config {
     pub budget: BudgetConfig,
     pub storage: StorageConfig,
     pub tray: TrayConfig,
+    pub window: WindowConfig,
+    pub compact: CompactConfig,
     pub ui: UiConfig,
     pub probe: ProbeConfig,
     pub debug: DebugConfig,
@@ -84,6 +86,38 @@ pub struct StorageConfig {
 pub struct TrayConfig {
     /// How often the GUI re-reads the database, in seconds.
     pub refresh_secs: u64,
+}
+
+/// Where the window was left when the program last exited: the position in
+/// screen pixels, the size in ui points.
+///
+/// The two units are not the same thing and cannot be. A pixel is a place on
+/// the desktop and stays one across displays scaled differently; a point is how
+/// big something looks, and that is what a size should keep.
+///
+/// Written at shutdown and read at the next launch. Whether the monitor it was
+/// taken on is still there is a question for the platform, asked before the
+/// window is created; what the accessors below reject is only a mangled file.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct WindowConfig {
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+    pub width: Option<f32>,
+    pub height: Option<f32>,
+}
+
+/// The compact plaque: a square of gauge rings that floats above everything.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct CompactConfig {
+    /// Side of the plaque in ui points.
+    pub size: f32,
+    /// How opaque the plaque is while the focus is elsewhere, 0..1.
+    pub inactive_opacity: f32,
+    /// Where the plaque was left, in screen pixels.
+    pub x: Option<f32>,
+    pub y: Option<f32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
@@ -157,6 +191,12 @@ impl Default for TrayConfig {
     }
 }
 
+impl Default for CompactConfig {
+    fn default() -> Self {
+        Self { size: 180.0, inactive_opacity: 0.55, x: None, y: None }
+    }
+}
+
 impl Default for ProbeConfig {
     fn default() -> Self {
         Self { enabled: true, interval_secs: 900, fresh_secs: 300 }
@@ -167,6 +207,58 @@ impl ProbeConfig {
     /// The interval actually used, whatever the file says.
     pub fn interval_secs(&self) -> u64 {
         self.interval_secs.max(MIN_PROBE_INTERVAL_SECS)
+    }
+}
+
+/// Below this the four rings stop being separable.
+pub const MIN_COMPACT_SIZE: f32 = 120.0;
+
+/// Past this a screen coordinate is not one. Restoring a window to a monitor
+/// that has since been unplugged puts it out of reach, and nothing in the file
+/// can say that has happened — this only keeps a corrupt value from doing it.
+const MAX_COORD: f32 = 32_000.0;
+
+fn coordinate(value: Option<f32>) -> Option<f32> {
+    value.filter(|v| v.is_finite() && v.abs() < MAX_COORD)
+}
+
+impl WindowConfig {
+    /// The remembered top-left of the window frame, in pixels.
+    pub fn position(&self) -> Option<(f32, f32)> {
+        Some((coordinate(self.x)?, coordinate(self.y)?))
+    }
+
+    /// The remembered size of the content area, in points.
+    pub fn size(&self) -> Option<(f32, f32)> {
+        let (width, height) = (coordinate(self.width)?, coordinate(self.height)?);
+        (width >= 1.0 && height >= 1.0).then_some((width, height))
+    }
+
+    pub fn set(&mut self, position: (f32, f32), size: (f32, f32)) {
+        (self.x, self.y) = (Some(position.0), Some(position.1));
+        (self.width, self.height) = (Some(size.0), Some(size.1));
+    }
+}
+
+impl CompactConfig {
+    /// The side actually used, whatever the file says.
+    pub fn size(&self) -> f32 {
+        if self.size.is_finite() { self.size.clamp(MIN_COMPACT_SIZE, 800.0) } else { 180.0 }
+    }
+
+    /// Where the plaque was left.
+    pub fn position(&self) -> Option<(f32, f32)> {
+        Some((coordinate(self.x)?, coordinate(self.y)?))
+    }
+
+    /// The opacity actually used. Fully transparent would leave nothing on
+    /// screen to click the plaque back with.
+    pub fn inactive_opacity(&self) -> f32 {
+        if self.inactive_opacity.is_finite() {
+            self.inactive_opacity.clamp(0.15, 1.0)
+        } else {
+            0.55
+        }
     }
 }
 
@@ -221,6 +313,39 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_remembered_window_comes_back_where_it_was() {
+        let mut window = WindowConfig::default();
+        assert_eq!(window.position(), None, "a first launch has nowhere to go back to");
+
+        // Negative coordinates are ordinary: a second monitor to the left of
+        // the primary one starts below zero.
+        window.set((-1200.0, 40.0), (800.0, 600.0));
+        assert_eq!(window.position(), Some((-1200.0, 40.0)));
+        assert_eq!(window.size(), Some((800.0, 600.0)));
+    }
+
+    /// A file that has been mangled must not put the window where no screen
+    /// reaches and no click can find it.
+    #[test]
+    fn a_geometry_no_screen_could_hold_is_ignored() {
+        let far = WindowConfig { x: Some(900_000.0), y: Some(0.0), ..WindowConfig::default() };
+        assert_eq!(far.position(), None);
+
+        let nan = WindowConfig { x: Some(f32::NAN), y: Some(0.0), ..WindowConfig::default() };
+        assert_eq!(nan.position(), None);
+
+        let flat = WindowConfig { width: Some(0.0), height: Some(600.0), ..WindowConfig::default() };
+        assert_eq!(flat.size(), None);
+    }
+
+    #[test]
+    fn the_plaque_remembers_its_own_corner() {
+        let left = CompactConfig { x: Some(12.0), y: Some(34.0), ..CompactConfig::default() };
+        assert_eq!(left.position(), Some((12.0, 34.0)));
+        assert_eq!(CompactConfig::default().position(), None, "until it has been dragged");
+    }
 
     #[test]
     fn default_target_is_a_seventh_of_the_week() {

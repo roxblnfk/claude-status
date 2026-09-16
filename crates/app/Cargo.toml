@@ -9,12 +9,21 @@ repository.workspace = true
 [dependencies]
 anyhow = "1.0.104"
 claude-status-core = { workspace = true }
-eframe = "0.36.1"
+# The glow backend rather than wgpu: the compact plaque needs a window with a
+# transparent background, and a DXGI swap chain on Windows offers no composite
+# alpha mode that would give one.
+eframe = { version = "0.36.1", default-features = false, features = ["accesskit", "default_fonts", "glow", "links", "wayland", "x11"] }
 egui = "0.36.1"
 egui_extras = "0.36.1"
 egui_plot = "0.37.0"
+raw-window-handle = "0.6.2"
 tiny-skia = "0.12.0"
 tray-icon = "0.24.2"
+
+# Taking the plaque off the taskbar, which egui only settles when a window is
+# created — and the one window here is created once.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_UI_Shell"] }
 
 # The tray icon sits on top of libayatana-appindicator and needs a GTK main
 # loop, which winit does not provide — we turn it by hand from the paint loop.

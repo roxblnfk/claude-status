@@ -85,7 +85,9 @@ impl Default for SettingsState {
     }
 }
 
-pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut SettingsState) {
+/// Returns `true` when the compact plaque was asked for.
+pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut SettingsState) -> bool {
+    let mut open_compact = false;
     ui.horizontal(|ui| {
         for page in Page::ALL {
             if ui.selectable_label(ui_state.page == page, page.label()).clicked() {
@@ -125,6 +127,8 @@ pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut SettingsStat
                 ui.add_space(12.0);
                 tray_section(ui, state);
                 ui.add_space(12.0);
+                open_compact = compact_section(ui, state);
+                ui.add_space(12.0);
                 autostart_section(ui, state, &mut ui_state.message);
                 ui.add_space(12.0);
                 storage_section(ui, state, &mut ui_state.confirming_reset, &mut ui_state.message);
@@ -160,6 +164,8 @@ pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut SettingsStat
             };
         }
     });
+
+    open_compact
 }
 
 /// Registering the hook — without it there is nothing to collect limits with.
@@ -381,6 +387,33 @@ fn tray_section(ui: &mut egui::Ui, state: &mut AppState) {
             );
         });
     });
+}
+
+/// The compact plaque.
+///
+/// Returns `true` when the plaque was asked for: switching the window over is
+/// the paint loop's business, not this page's.
+fn compact_section(ui: &mut egui::Ui, state: &mut AppState) -> bool {
+    let mut open = false;
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.strong(tr("settings.compact.title"));
+        ui.add_space(4.0);
+        ui.label(tr("settings.compact.explanation"));
+        ui.add_space(6.0);
+
+        ui.horizontal(|ui| {
+            ui.label(tr("settings.compact.opacity"));
+            ui.add(
+                egui::Slider::new(&mut state.config.compact.inactive_opacity, 0.15..=1.0)
+                    .fixed_decimals(2),
+            );
+        });
+
+        ui.add_space(6.0);
+        open = ui.button(tr("settings.compact.open")).clicked();
+    });
+    open
 }
 
 /// Starting with the session.
