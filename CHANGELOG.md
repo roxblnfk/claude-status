@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/roxblnfk/claude-status/compare/v1.8.0...v1.9.0) (2026-09-16)
+
+
+### Features
+
+* fold the window into a gauge plaque that floats above everything ([#12](https://github.com/roxblnfk/claude-status/issues/12)) ([aef43a2](https://github.com/roxblnfk/claude-status/commit/aef43a2030479e2a4ccd17ea2d2400d4835d5cad))
+
 ## [1.8.0](https://github.com/roxblnfk/claude-status/compare/v1.7.0...v1.8.0) (2026-09-05)
 
 
