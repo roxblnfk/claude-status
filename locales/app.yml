@@ -1225,9 +1225,6 @@ settings:
     opacity:
       en: "Opacity while inactive:"
       ru: "Непрозрачность без фокуса:"
-    size:
-      en: "Side:"
-      ru: "Сторона:"
     open:
       en: Open the panel
       ru: Открыть плашку

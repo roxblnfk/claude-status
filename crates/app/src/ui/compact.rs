@@ -1,31 +1,51 @@
 //! The compact plaque: the four gauges in a frameless square that floats over
 //! whatever the user is actually working in.
 
-use claude_status_core::{Config, WindowState, config::MIN_COMPACT_SIZE, pace::Overview, tr, tr_args};
+use claude_status_core::{
+    WindowState,
+    config::{CompactConfig, MIN_COMPACT_SIZE},
+    pace::Overview, tr, tr_args,
+};
 use eframe::egui;
 
+use crate::screen;
 use crate::state::AppState;
 use crate::ui::rings::{self, Gauge, Palette};
 
 /// What the plaque needs to remember between frames.
-#[derive(Default)]
+///
+/// Positions are in pixels and sizes in points — see [`crate::screen`], which
+/// is also where the two are converted.
 pub struct Compact {
     pub active: bool,
-    /// The normal window's geometry, to come back to.
-    restore: Option<(egui::Pos2, egui::Vec2)>,
-    /// Where the plaque was last left. Held for the session only: a position
-    /// written to disk outlives the monitor it was taken on.
-    position: Option<egui::Pos2>,
+    /// The full window's geometry while the plaque stands in for it.
+    window: Option<([f32; 2], egui::Vec2)>,
+    /// Where the plaque was last left, and how big it was — seeded from the
+    /// configuration, so it opens where the last session left it.
+    position: Option<[f32; 2]>,
+    side: f32,
     /// The window's size last frame — which edge a resize moved.
     last_size: Option<egui::Vec2>,
 }
 
 impl Compact {
+    pub fn new(config: &CompactConfig) -> Self {
+        Self {
+            active: false,
+            window: None,
+            position: config.position().map(|(x, y)| [x, y]),
+            side: config.size(),
+            last_size: None,
+        }
+    }
+
     /// Turns the window into the plaque.
-    pub fn enter(&mut self, ctx: &egui::Context, side: f32) {
-        self.restore = ctx.input(|i| {
+    pub fn enter(&mut self, ctx: &egui::Context) {
+        let per_point = ctx.pixels_per_point();
+        self.window = ctx.input(|i| {
             let viewport = i.viewport();
-            Some((viewport.outer_rect?.min, viewport.inner_rect?.size()))
+            let position = screen::to_pixels(viewport.outer_rect?.min, per_point);
+            Some((position, viewport.inner_rect?.size()))
         });
         self.active = true;
         self.last_size = None;
@@ -39,31 +59,53 @@ impl Compact {
         ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::Vec2::splat(
             MIN_COMPACT_SIZE,
         )));
-        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::Vec2::splat(side)));
-        if let Some(position) = self.position {
-            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(position));
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::Vec2::splat(self.side)));
+
+        let side_px = self.side * per_point;
+        if let Some(position) = self.position.filter(|&at| screen::is_on_a_monitor(at, [side_px; 2]))
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(screen::to_points(
+                position, per_point,
+            )));
         }
     }
 
-    /// Gives the normal window back. Returns the side the plaque ended up with.
-    pub fn leave(&mut self, ctx: &egui::Context) -> Option<f32> {
+    /// Gives the full window back, where and as big as it was.
+    pub fn leave(&mut self, ctx: &egui::Context) {
+        let per_point = ctx.pixels_per_point();
         self.active = false;
-        let (position, size) = ctx.input(|i| {
+        ctx.input(|i| {
             let viewport = i.viewport();
-            (viewport.outer_rect.map(|r| r.min), viewport.inner_rect.map(|r| r.size()))
+            if let Some(rect) = viewport.outer_rect {
+                self.position = Some(screen::to_pixels(rect.min, per_point));
+            }
+            if let Some(rect) = viewport.inner_rect {
+                self.side = rect.width().min(rect.height());
+            }
         });
-        self.position = position;
 
         ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
             egui::viewport::WindowLevel::Normal,
         ));
         ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(crate::MIN_WINDOW_SIZE.into()));
-        if let Some((position, size)) = self.restore.take() {
+        if let Some((position, size)) = self.window.take() {
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
-            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(position));
+            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(screen::to_points(
+                position, per_point,
+            )));
         }
-        size.map(|size| size.x.min(size.y))
+    }
+
+    /// Where the plaque sits and how big, for the configuration to keep.
+    pub fn plaque(&self) -> (Option<[f32; 2]>, f32) {
+        (self.position, self.side)
+    }
+
+    /// Where the full window stood when the plaque took its place. `None` while
+    /// the window itself is what is on screen.
+    pub fn window(&self) -> Option<([f32; 2], egui::Vec2)> {
+        self.window
     }
 
     /// Pulls the window back into a square after a resize.
@@ -247,15 +289,6 @@ fn readout(state: &AppState) -> Vec<String> {
             })
         })
         .collect()
-}
-
-/// Stores the side the plaque was left at, so the next one opens the same size.
-pub fn remember_size(config: &mut Config, side: f32) -> anyhow::Result<()> {
-    if (config.compact.size() - side).abs() < 1.0 {
-        return Ok(());
-    }
-    config.compact.size = side;
-    config.save()
 }
 
 #[cfg(test)]

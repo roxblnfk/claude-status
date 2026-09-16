@@ -2,7 +2,7 @@
 
 use claude_status_core::{
     Db, Language, autostart,
-    config::{MIN_COMPACT_SIZE, MIN_PROBE_INTERVAL_SECS, PRESETS},
+    config::{MIN_PROBE_INTERVAL_SECS, PRESETS},
     i18n,
     install::{self, InstallStatus},
     paths,
@@ -408,10 +408,6 @@ fn compact_section(ui: &mut egui::Ui, state: &mut AppState) -> bool {
                 egui::Slider::new(&mut state.config.compact.inactive_opacity, 0.15..=1.0)
                     .fixed_decimals(2),
             );
-        });
-        ui.horizontal(|ui| {
-            ui.label(tr("settings.compact.size"));
-            ui.add(egui::DragValue::new(&mut state.config.compact.size).range(MIN_COMPACT_SIZE..=800.0));
         });
 
         ui.add_space(6.0);

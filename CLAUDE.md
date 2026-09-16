@@ -42,6 +42,20 @@ it, so `eframe` is pulled with `default-features = false` and `glow`.
 `set_transparent` only flips a flag on Windows, and the blur-behind that wires
 up the alpha is applied once, when the window is made.
 
+**A position in ui points is only a position on one monitor.** egui reports
+`outer_rect` as pixels divided by the window's scale factor and multiplies
+`ViewportCommand::OuterPosition` back by the same, so a position read on a
+150 % display and applied while the window sits on a 100 % one lands half as
+far out again — remembering the window across a restart put it 750 px away the
+first time. `crate::screen` keeps positions in pixels and converts at the egui
+boundary; sizes stay in points, where the same number is the same apparent size
+on either display.
+
+**The viewport builder cannot place a window by pixel.** It takes points, and
+winit multiplies them by the scale factor of whichever display the window
+happens to open on — not the one the position belongs to. The restore is sent
+as a viewport command on the first frame instead, where the factor is known.
+
 **`WindowLevel(AlwaysOnTop)` is applied only when it changes.** winit calls
 `SetWindowPos` from the diff of its own flags, so sending the same level again
 is a no-op — if anything outside the process clears `WS_EX_TOPMOST`, the plaque

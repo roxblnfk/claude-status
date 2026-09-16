@@ -8,7 +8,7 @@ mod overview;
 pub mod rings;
 mod settings;
 
-use claude_status_core::{timefmt, tr, tr_args};
+use claude_status_core::{Config, timefmt, tr, tr_args};
 use eframe::egui;
 
 use crate::state::{AppState, Period, Range};
@@ -35,7 +35,6 @@ impl Tab {
 }
 
 /// Widget state that survives between frames.
-#[derive(Default)]
 pub struct UiState {
     pub tab: Option<Tab>,
     /// The plaque, and the window geometry it will hand back.
@@ -46,6 +45,15 @@ pub struct UiState {
 }
 
 impl UiState {
+    pub fn new(config: &Config) -> Self {
+        Self {
+            tab: None,
+            compact: compact::Compact::new(&config.compact),
+            settings: settings::SettingsState::default(),
+            breakdown: models::Breakdown::default(),
+        }
+    }
+
     fn tab(&mut self) -> Tab {
         *self.tab.get_or_insert(Tab::Overview)
     }
@@ -55,11 +63,8 @@ impl UiState {
 pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut UiState) -> bool {
     if ui_state.compact.active {
         let action = compact::draw(ui, state, &mut ui_state.compact);
-        if action.leave
-            && let Some(side) = ui_state.compact.leave(ui.ctx())
-            && let Err(e) = compact::remember_size(&mut state.config, side)
-        {
-            state.error = Some(format!("{e:#}"));
+        if action.leave {
+            ui_state.compact.leave(ui.ctx());
         }
         return action.refresh;
     }
@@ -79,7 +84,7 @@ pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut UiState) -> 
                 // minimise/maximise/close is out of reach; this is the nearest
                 // thing to it that belongs to us.
                 if ui.button("◎").on_hover_text(tr("compact.enter")).clicked() {
-                    ui_state.compact.enter(ui.ctx(), state.config.compact.size());
+                    ui_state.compact.enter(ui.ctx());
                 }
                 let hint = if state.config.probe.enabled {
                     tr("ui.refresh_hint")
@@ -122,7 +127,7 @@ pub fn draw(ui: &mut egui::Ui, state: &mut AppState, ui_state: &mut UiState) -> 
     });
 
     if open_compact {
-        ui_state.compact.enter(ui.ctx(), state.config.compact.size());
+        ui_state.compact.enter(ui.ctx());
     }
     ui_state.tab = Some(goto.unwrap_or(active));
     refresh_requested
