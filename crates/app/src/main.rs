@@ -8,6 +8,7 @@ mod cli;
 mod hook;
 mod icon;
 mod state;
+mod taskbar;
 mod tray;
 mod ui;
 
@@ -82,6 +83,9 @@ struct App {
     /// Spent on the first frame: `with_visible(false)` alone is not enough,
     /// eframe shows the window once it has something to draw.
     hide_on_start: bool,
+    /// Whether the taskbar lists the window. The plaque takes its place there,
+    /// and showing the window again puts it back whatever we asked for.
+    on_taskbar: bool,
 }
 
 impl App {
@@ -94,6 +98,7 @@ impl App {
             last_refresh: Instant::now(),
             quitting: false,
             hide_on_start: hidden,
+            on_taskbar: true,
         }
     }
 
@@ -129,9 +134,24 @@ impl App {
         }
     }
 
-    fn show_window(&self, ctx: &egui::Context) {
+    fn show_window(&mut self, ctx: &egui::Context) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        // Showing a window puts it back on the taskbar; if the plaque is what is
+        // coming back, the next tick has to take it off again.
+        self.on_taskbar = true;
+    }
+
+    /// Keeps the taskbar in step with which shape the window is in.
+    fn sync_taskbar(&mut self, frame: &eframe::Frame) {
+        let listed = !self.ui_state.compact.active;
+        if self.on_taskbar == listed {
+            return;
+        }
+        self.on_taskbar = listed;
+        if let Err(e) = taskbar::set_listed(frame, listed) {
+            self.state.error = Some(tr_args("error.taskbar", &[("error", &format!("{e:#}"))]));
+        }
     }
 }
 
@@ -142,9 +162,10 @@ impl eframe::App for App {
     /// somebody requested a repaint — `ui` is not called at all in that case.
     /// So the tray and the data refresh live here: an application minimised to
     /// the tray must keep working.
-    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         tray::pump_platform_events();
         self.ensure_tray(ctx);
+        self.sync_taskbar(frame);
 
         if self.hide_on_start {
             self.hide_on_start = false;

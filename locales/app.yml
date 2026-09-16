@@ -72,6 +72,12 @@ error:
   build_icon:
     en: could not build an icon from RGBA
     ru: не удалось построить иконку из RGBA
+  window_handle:
+    en: could not get a handle on the application window
+    ru: не удалось получить дескриптор окна приложения
+  taskbar:
+    en: "could not change the taskbar entry: %{error}"
+    ru: "не удалось изменить кнопку в панели задач: %{error}"
   create_tray:
     en: could not create the tray icon
     ru: не удалось создать иконку в трее

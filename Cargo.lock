@@ -704,8 +704,10 @@ dependencies = [
  "egui_extras",
  "egui_plot",
  "gtk",
+ "raw-window-handle",
  "tiny-skia",
  "tray-icon",
+ "windows",
 ]
 
 [[package]]
