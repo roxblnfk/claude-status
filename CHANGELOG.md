@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.9.1](https://github.com/roxblnfk/claude-status/compare/v1.9.0...v1.9.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* stop the overflow ring from closing on exactly two laps ([0ac0f91](https://github.com/roxblnfk/claude-status/commit/0ac0f916937ee39b126c591e408f51a94a276359))
+* take the reading that changed last, not the one heard last ([#15](https://github.com/roxblnfk/claude-status/issues/15)) ([0ac0f91](https://github.com/roxblnfk/claude-status/commit/0ac0f916937ee39b126c591e408f51a94a276359))
+
+
+### Documentation
+
+* give the project a logo ([742e72e](https://github.com/roxblnfk/claude-status/commit/742e72ee8ddfc7831261f881e497c0028ea9dd5c))
+
 ## [1.9.0](https://github.com/roxblnfk/claude-status/compare/v1.8.0...v1.9.0) (2026-09-16)
 
 
