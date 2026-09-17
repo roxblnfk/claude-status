@@ -121,6 +121,9 @@ pub struct Db {
 /// Marks that the one-off rounding of stored boundaries has run.
 const BOUNDARIES_ROUNDED: &str = "boundaries_rounded";
 
+/// Migration flag: repeats already on disk have been folded.
+const REPLAYS_COLLAPSED: &str = "replays_collapsed";
+
 impl Db {
     /// Opens the database in the application data directory, applying the schema.
     pub fn open_default() -> Result<Self> {
@@ -263,7 +266,68 @@ impl Db {
             self.round_stored_boundaries()?;
             self.meta_set(BOUNDARIES_ROUNDED, "1")?;
         }
+
+        // Rows a channel wrote to say nothing new still claim, one `ts` each,
+        // that the reading was news at the minute it was written. The rule that
+        // keeps them out ([`Db::replay_of`]) only applies to what comes next,
+        // so a database that has been collecting keeps reading its own churn as
+        // the latest word until it is folded once.
+        if self.meta_get(REPLAYS_COLLAPSED)?.is_none() {
+            self.collapse_stored_replays()?;
+            self.meta_set(REPLAYS_COLLAPSED, "1")?;
+        }
         Ok(())
+    }
+
+    /// Folds repeats already on disk onto the rows they repeat, as
+    /// [`Db::replay_of`] would have.
+    ///
+    /// A run of rows carrying one state, each written while the one before it
+    /// was still being confirmed, becomes the first of them — keeping the
+    /// confirmation the last of them had reached, which is what makes the
+    /// channel go on matching that row instead of starting the churn again.
+    fn collapse_stored_replays(&self) -> Result<usize> {
+        // The channel is every column a repeat has to match, so it is what all
+        // three windows partition by — a run numbered across channels would
+        // fold one channel's rows onto another's.
+        const CHANNEL: &str = "PARTITION BY session_id, five_pct, five_resets_at,
+                                            week_pct, week_resets_at, opus_pct";
+        self.conn.execute_batch(&format!(
+            "CREATE TEMP TABLE replay_runs AS
+             WITH marked AS (
+                 SELECT id, ts, last_seen_ts, session_id, five_pct, five_resets_at,
+                        week_pct, week_resets_at, opus_pct,
+                        CASE WHEN ts - LAG(MAX(ts, last_seen_ts)) OVER channel
+                                  <= {REPLAY_WINDOW_SECS} THEN 0 ELSE 1 END AS starts_a_run
+                 FROM samples
+                 WINDOW channel AS ({CHANNEL} ORDER BY ts, id)
+             ),
+             numbered AS (
+                 SELECT id, ts, last_seen_ts, session_id, five_pct, five_resets_at,
+                        week_pct, week_resets_at, opus_pct,
+                        SUM(starts_a_run) OVER channel AS run
+                 FROM marked
+                 WINDOW channel AS ({CHANNEL} ORDER BY ts, id)
+             )
+             SELECT id,
+                    FIRST_VALUE(id) OVER whole_run AS keeper,
+                    MAX(last_seen_ts) OVER whole_run AS seen_until
+             FROM numbered
+             WINDOW whole_run AS ({CHANNEL}, run ORDER BY ts, id
+                                  ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING);"
+        ))?;
+        self.conn.execute(
+            "UPDATE samples SET last_seen_ts =
+                 (SELECT seen_until FROM replay_runs WHERE keeper = samples.id)
+             WHERE id IN (SELECT keeper FROM replay_runs)",
+            [],
+        )?;
+        let folded = self.conn.execute(
+            "DELETE FROM samples WHERE id IN (SELECT id FROM replay_runs WHERE id <> keeper)",
+            [],
+        )?;
+        self.conn.execute_batch("DROP TABLE replay_runs;")?;
+        Ok(folded)
     }
 
     /// Brings boundaries already on disk onto the minute [`boundary`] rounds to.
@@ -311,16 +375,12 @@ impl Db {
         let opus_pct = opus.and_then(|w| w.used_percentage);
         let opus_resets_at = boundary(opus.and_then(|w| w.resets_at));
 
-        // Compared against this session's own previous sample, not the global
-        // last one: with several Claude Code sessions running, their readings
-        // interleave and nothing would ever look unchanged.
-        if let Some(last) = self.latest_for_session(input.session_id.as_deref())?
-            && same_state(&last, five_pct, five_resets_at, week_pct, week_resets_at, opus_pct)
-        {
-            self.conn.execute(
-                "UPDATE samples SET last_seen_ts = ?1 WHERE id = ?2",
-                params![now.max(last.last_seen_ts), last.id],
-            )?;
+        // Compared against this session's own rows, not the global last one:
+        // with several Claude Code sessions running, their readings interleave
+        // and nothing would ever look unchanged.
+        let reading = Reading { five_pct, five_resets_at, week_pct, week_resets_at, opus_pct };
+        if let Some(row) = self.replay_of(input.session_id.as_deref(), reading, now)? {
+            self.touch(&row, now)?;
             return Ok(Written::Touched);
         }
 
@@ -369,13 +429,9 @@ impl Db {
         let opus_pct = usage.scoped.as_ref().map(|(_, w)| w.used_pct);
         let opus_resets_at = boundary(usage.scoped.as_ref().map(|(_, w)| w.resets_at));
 
-        if let Some(last) = self.latest_for_session(Some(crate::probe::SOURCE))?
-            && same_state(&last, five_pct, five_resets_at, week_pct, week_resets_at, opus_pct)
-        {
-            self.conn.execute(
-                "UPDATE samples SET last_seen_ts = ?1 WHERE id = ?2",
-                params![now.max(last.last_seen_ts), last.id],
-            )?;
+        let reading = Reading { five_pct, five_resets_at, week_pct, week_resets_at, opus_pct };
+        if let Some(row) = self.replay_of(Some(crate::probe::SOURCE), reading, now)? {
+            self.touch(&row, now)?;
             return Ok(Written::Touched);
         }
 
@@ -431,17 +487,78 @@ impl Db {
         Ok(name)
     }
 
-    /// The most recently stored sample.
+    /// The sample heard of last: the newest reading, or an older one that is
+    /// still being confirmed.
+    ///
+    /// Not the last row written. Once repeats collapse onto the row they repeat
+    /// ([`Db::replay_of`]), a machine whose sessions are all idling inserts
+    /// nothing for hours — and the data is not stale for that, the counters
+    /// simply have not moved. This is what [`crate::pace::Overview`] dates its
+    /// freshness by.
     pub fn latest(&self) -> Result<Option<Sample>> {
         let sample = self
             .conn
             .query_row(
-                &format!("SELECT {COLUMNS} FROM samples ORDER BY id DESC LIMIT 1"),
+                &format!(
+                    "SELECT {COLUMNS} FROM samples ORDER BY MAX(ts, last_seen_ts) DESC, id DESC LIMIT 1"
+                ),
                 [],
                 row_to_sample,
             )
             .optional()?;
         Ok(sample)
+    }
+
+    /// The row a report only repeats, if there is one.
+    ///
+    /// A reading earns a row of its own when it *changed*; every later
+    /// confirmation moves `last_seen_ts` instead. That is what makes `ts` mean
+    /// "when this channel last learned something", which is what
+    /// [`Db::current_sample`] reads the current state by.
+    ///
+    /// The channel is not the session. Two Claude Code processes can sit on one
+    /// `session_id` — a session opened a second time — and each refresh then
+    /// carries the reading the other never reported: 39 % and 45 % alternating
+    /// a minute apart for hours while the counter stood at 49 %. Compared
+    /// against the session's newest row alone the two defeat each other, every
+    /// refresh inserts a row, and both frozen readings keep looking brand new.
+    /// So any row of the session still being confirmed stands for a channel,
+    /// and a report matching one is that channel saying the same thing again.
+    fn replay_of(
+        &self,
+        session_id: Option<&str>,
+        reading: Reading,
+        now: i64,
+    ) -> Result<Option<Sample>> {
+        // The session's own newest row first, however long ago it spoke: a
+        // channel quiet for an hour that comes back with the same reading has
+        // still not changed.
+        if let Some(last) = self.latest_for_session(session_id)?.filter(|s| reading.matches(s)) {
+            return Ok(Some(last));
+        }
+
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {COLUMNS} FROM samples
+             WHERE session_id IS ?1 AND MAX(ts, last_seen_ts) >= ?2
+             ORDER BY ts DESC, id DESC"
+        ))?;
+        let rows = stmt.query_map(params![session_id, now - REPLAY_WINDOW_SECS], row_to_sample)?;
+        for row in rows {
+            let row = row?;
+            if reading.matches(&row) {
+                return Ok(Some(row));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Notes that a row's state is what a channel still reports.
+    fn touch(&self, row: &Sample, now: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE samples SET last_seen_ts = ?1 WHERE id = ?2",
+            params![now.max(row.last_seen_ts), row.id],
+        )?;
+        Ok(())
     }
 
     /// The most recent sample written by a given session.
@@ -466,11 +583,17 @@ impl Db {
     /// assembled on its own: the boundary is the latest any row carries — a
     /// window never rolls back — and the reading is the newest row within it.
     ///
-    /// Not the highest. That was the rule once, on the theory that an idle
-    /// session replays stale, lower readings; the database shows that noise at
-    /// two points at most, while Anthropic zeroed the weekly counters twice in
-    /// the week Fable 5.1 shipped without touching the boundary, and the
-    /// maximum showed 32 % for hours against 12 % on the history plot.
+    /// The newest row is the reading that *changed* last, not the reading heard
+    /// last: a channel repeating itself only moves `last_seen_ts`, which is
+    /// what [`Db::replay_of`] is for. So a channel frozen on a cached block
+    /// falls behind whoever has learned something since, however loudly it
+    /// keeps talking.
+    ///
+    /// Not the highest reading. That was the rule once, on the theory that an
+    /// idle session replays stale, lower readings; Anthropic then zeroed the
+    /// weekly counters twice in the week Fable 5.1 shipped without touching the
+    /// boundary, and the maximum showed 32 % for hours against 12 % on the
+    /// history plot.
     pub fn current_sample(&self) -> Result<Option<Sample>> {
         let Some(latest) = self.latest()? else {
             return Ok(None);
@@ -962,6 +1085,17 @@ fn row_to_sample(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sample> {
     })
 }
 
+/// How long a row keeps standing for the channel that wrote it.
+///
+/// Claude Code re-runs the status line on `refreshInterval` — 60 s as
+/// `claude-status install` sets it — and hands it the usage block it already
+/// holds, so a channel that is spending nothing repeats itself at that cadence.
+/// Well past that cadence a matching reading is not a repeat but an arrival:
+/// once Anthropic zeroes a counter mid-window the percentages climb back
+/// through the ones already seen, and touching the row from before the reset
+/// would date the new reading to before it.
+const REPLAY_WINDOW_SECS: i64 = 900;
+
 /// How far the readings of concurrent sessions have been seen to disagree
 /// within one window: whole percents, a point or two behind for the session
 /// whose last reply is the older. A reading further below an earlier one is
@@ -984,19 +1118,30 @@ fn boundary(resets_at: Option<i64>) -> Option<i64> {
     resets_at.map(|ts| (ts + 30).div_euclid(60) * 60)
 }
 
-fn same_state(
-    last: &Sample,
+/// The limit state one report carries — what makes two readings the same
+/// reading, and nothing else about the row it came in.
+#[derive(Debug, Clone, Copy)]
+struct Reading {
     five_pct: Option<f64>,
     five_resets_at: Option<i64>,
     week_pct: Option<f64>,
     week_resets_at: Option<i64>,
     opus_pct: Option<f64>,
-) -> bool {
-    eq_pct(last.five_pct, five_pct)
-        && last.five_resets_at == five_resets_at
-        && eq_pct(last.week_pct, week_pct)
-        && last.week_resets_at == week_resets_at
-        && eq_pct(last.opus_pct, opus_pct)
+}
+
+impl Reading {
+    /// Whether a stored row says the same thing.
+    ///
+    /// The scoped boundary is not compared: in 1120 rows carrying one it was
+    /// the weekly boundary every time, so it can only repeat what the weekly
+    /// comparison already said.
+    fn matches(&self, row: &Sample) -> bool {
+        eq_pct(row.five_pct, self.five_pct)
+            && row.five_resets_at == self.five_resets_at
+            && eq_pct(row.week_pct, self.week_pct)
+            && row.week_resets_at == self.week_resets_at
+            && eq_pct(row.opus_pct, self.opus_pct)
+    }
 }
 
 /// Percentages arrive as f64 with one decimal; compare with a tolerance.
@@ -1316,6 +1461,50 @@ mod tests {
         assert_eq!(current.week_pct, Some(27.0), "the stray second must not shadow the window");
     }
 
+    /// The churn a database collected before repeats collapsed: two channels
+    /// interleaving under one session id, a row a minute. Folding them has to
+    /// keep the channels apart, and hand each survivor the confirmation its run
+    /// had reached — dated back to where the run started, the row would no
+    /// longer match the channel repeating it and the churn would start again.
+    #[test]
+    fn replays_already_on_disk_are_folded_per_channel() {
+        let db = Db::open_in_memory().unwrap();
+        let insert = |ts: i64, week: f64, session: &str| {
+            db.conn
+                .execute(
+                    "INSERT INTO samples (ts, last_seen_ts, week_pct, week_resets_at, session_id)
+                     VALUES (?1, ?1, ?2, 999, ?3)",
+                    params![ts, week, session],
+                )
+                .unwrap();
+        };
+
+        insert(100, 5.0, "s");
+        for step in 0..=10 {
+            insert(1_000 + step * 60, 39.0, "s");
+            insert(1_030 + step * 60, 45.0, "s");
+        }
+        // The same 5 % again, long after the row that first carried it fell
+        // silent: an arrival of its own, and two rows have to survive it.
+        insert(1_500, 5.0, "s");
+        insert(2_000, 49.0, "p");
+
+        db.conn.execute("DELETE FROM meta WHERE key = ?1", params![REPLAYS_COLLAPSED]).unwrap();
+        db.migrate().unwrap();
+
+        let rows = db.samples_between(0, 10_000).unwrap();
+        let at = |ts: i64| rows.iter().find(|r| r.ts == ts).expect("the run's first row stays");
+        assert_eq!(rows.len(), 5, "one row per run: {rows:#?}");
+        assert_eq!(at(1_000).week_pct, Some(39.0));
+        assert_eq!(at(1_000).last_seen_ts, 1_600, "the confirmation the run reached");
+        assert_eq!(at(1_030).week_pct, Some(45.0));
+        assert_eq!(at(1_030).last_seen_ts, 1_630);
+        assert_eq!(at(100).week_pct, Some(5.0));
+        assert_eq!(at(1_500).week_pct, Some(5.0), "a reading that came back is not that row");
+        assert_eq!(db.current_sample().unwrap().unwrap().week_pct, Some(49.0));
+        assert_eq!(db.collapse_stored_replays().unwrap(), 0, "nothing is left to fold");
+    }
+
     /// The same drift on rows written before the rounding existed: the
     /// migration has to fold them back onto one boundary, or a database that
     /// has already been collecting keeps reading wrong.
@@ -1352,6 +1541,84 @@ mod tests {
         assert_eq!(db.record(&session_input("b", 25.0, 30.0, 999), 210).unwrap(), Written::Touched);
 
         assert_eq!(db.samples_between(0, 1000).unwrap().len(), 2, "one row per session");
+    }
+
+    /// One `session_id`, two Claude Code processes — a session opened a second
+    /// time. Each refresh carries the usage block its own process holds, so the
+    /// two readings alternate; on a real machine 39 % and 45 % went round every
+    /// minute for hours while the week stood at 49 %.
+    #[test]
+    fn two_processes_sharing_a_session_repeat_themselves_rather_than_pile_up() {
+        let db = Db::open_in_memory().unwrap();
+        db.record(&session_input("s", 1.0, 39.0, 999), 200).unwrap();
+        db.record(&session_input("s", 2.0, 45.0, 999), 260).unwrap();
+
+        let mut now = 320;
+        let refresh = |db: &Db, now: i64| {
+            assert_eq!(
+                db.record(&session_input("s", 1.0, 39.0, 999), now).unwrap(),
+                Written::Touched,
+                "the low channel is repeating itself at {now}"
+            );
+            assert_eq!(
+                db.record(&session_input("s", 2.0, 45.0, 999), now + 6).unwrap(),
+                Written::Touched,
+                "and so is the high one"
+            );
+        };
+        for _ in 0..10 {
+            refresh(&db, now);
+            now += 60;
+        }
+        // A session that has actually heard from the API in between.
+        db.record(&session_input("live", 3.0, 49.0, 999), now).unwrap();
+        for _ in 0..10 {
+            now += 60;
+            refresh(&db, now);
+        }
+
+        assert_eq!(db.samples_between(0, 10_000).unwrap().len(), 3, "one row per channel");
+        let current = db.current_sample().unwrap().unwrap();
+        assert_eq!(current.week_pct, Some(49.0), "the channel that changed last, not the loudest");
+    }
+
+    /// Repeats stopped inserting rows, so on an idling machine the newest row
+    /// can be hours old while the hook keeps running. That is not stale data —
+    /// it is a counter that has not moved — and the tray says so from here.
+    #[test]
+    fn freshness_counts_a_repeated_reading_as_having_been_heard() {
+        let db = Db::open_in_memory().unwrap();
+        db.record(&session_input("s", 5.0, 20.0, 10_000_000), 1_000).unwrap();
+        db.record(&session_input("s", 5.0, 20.0, 10_000_000), 8_000).unwrap();
+
+        let overview = db.overview(8_100).unwrap();
+        assert_eq!(overview.sampled_at, Some(8_000), "the last confirmation, not the last insert");
+        assert_eq!(overview.staleness_secs(8_100), Some(100));
+    }
+
+    /// Anthropic zeroes a counter mid-window and the percentages climb back
+    /// through the ones already seen. A reading matching a row that has long
+    /// fallen silent is an arrival, not that row repeating itself: dated back
+    /// to before the reset it would be read as the oldest news in the window
+    /// rather than the newest.
+    #[test]
+    fn a_reading_that_returns_after_a_silence_is_an_arrival_not_a_repeat() {
+        let db = Db::open_in_memory().unwrap();
+        db.record(&session_input("s", 2.0, 5.0, 999), 1_000).unwrap();
+        db.record(&session_input("s", 9.0, 30.0, 999), 2_000).unwrap();
+
+        // Zeroed, and hours later back at the 5 % this session once reported.
+        let after_reset = 2_000 + 4 * 3_600;
+        db.record(&session_input("s", 1.0, 0.0, 999), after_reset).unwrap();
+        assert_eq!(
+            db.record(&session_input("s", 2.0, 5.0, 999), after_reset + 600).unwrap(),
+            Written::Inserted
+        );
+
+        let rows = db.samples_between(0, 100_000).unwrap();
+        assert_eq!(rows.len(), 4);
+        assert_eq!(rows.last().unwrap().ts, after_reset + 600, "as new as the reset before it");
+        assert_eq!(db.current_sample().unwrap().unwrap().week_pct, Some(5.0));
     }
 
     #[test]
@@ -1508,6 +1775,42 @@ mod tests {
 
         let (pct, estimated) = db.week_baseline(WEEK_RESETS, 30_000).unwrap().unwrap();
         assert_eq!(pct, 0.0);
+        assert!(!estimated);
+    }
+
+    /// The daily ration once read 216 %: two processes on one session id
+    /// alternated 39 % and 45 % for hours while the week stood at 49 %. Taken
+    /// for the current level, 45 % made the 48 % and 49 % recorded earlier the
+    /// same day look like a counter zeroed since, so the baseline collapsed to
+    /// zero and the whole week's spending was filed as spent since midnight.
+    #[test]
+    fn a_frozen_channel_does_not_zero_the_daily_baseline() {
+        let db = Db::open_in_memory().unwrap();
+        // Last night, before midnight at 30_000.
+        db.record(&session_input("a", 10.0, 36.0, WEEK_RESETS), 20_000).unwrap();
+
+        // Today: two frozen channels start up and go round every minute, while
+        // the level of the week goes on climbing elsewhere.
+        db.record(&session_input("s", 1.0, 39.0, WEEK_RESETS), 40_000).unwrap();
+        db.record(&session_input("s", 2.0, 45.0, WEEK_RESETS), 40_060).unwrap();
+        let mut now = 40_120;
+        for step in 0..30 {
+            db.record(&session_input("s", 1.0, 39.0, WEEK_RESETS), now).unwrap();
+            db.record(&session_input("s", 2.0, 45.0, WEEK_RESETS), now + 6).unwrap();
+            // Two sessions that really did hear from the API in between.
+            if step == 10 {
+                db.record(&session_input("a", 11.0, 48.0, WEEK_RESETS), now + 20).unwrap();
+            }
+            if step == 20 {
+                db.record(&session_input("b", 12.0, 49.0, WEEK_RESETS), now + 20).unwrap();
+            }
+            now += 60;
+        }
+
+        assert_eq!(db.current_sample().unwrap().unwrap().week_pct, Some(49.0));
+
+        let (pct, estimated) = db.week_baseline(WEEK_RESETS, 30_000).unwrap().unwrap();
+        assert_eq!(pct, 36.0, "the level the day started from, not zero");
         assert!(!estimated);
     }
 

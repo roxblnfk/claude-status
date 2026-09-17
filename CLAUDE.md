@@ -116,12 +116,24 @@ there were 16. `scan::project_of` walks up to the `.git`.
 sessions write at once, so the newest row is only the newest state; per window,
 the current reading is the newest row inside the latest boundary
 (`Db::current_sample`). It used to be the running maximum, on the theory that an
-idle session replays stale, lower readings. The database disagrees: concurrent
-sessions differ by two points at most, while Anthropic zeroed the weekly
+idle session replays stale, lower readings — until Anthropic zeroed the weekly
 counters twice in the week Fable 5.1 shipped, `resets_at` unchanged, and the
-maximum showed 32 % for hours against 12 % on the history plot. Anything reading
-history has to allow for a drop: the pace and the daily baseline run from the
-last reading more than `READING_NOISE_PCT` above the current one.
+maximum showed 32 % for hours against 12 % on the history plot. What makes the
+newest row the right one is that `ts` is the moment a reading *changed*: a
+channel repeating itself only moves `last_seen_ts` (`Db::replay_of`), so the
+reading heard last loses to the reading learnt last. Anything reading history
+has to allow for a drop: the pace and the daily baseline run from the last
+reading more than `READING_NOISE_PCT` above the current one — a threshold set
+for the point or two concurrent sessions disagree by, which a channel frozen on
+a cached block can exceed by ten.
+
+**A `session_id` is not one channel.** A session opened a second time is two
+Claude Code processes filing under one id, each refreshing the status line with
+the usage block its own process holds. Both were frozen — 39 % and 45 %, a row a
+minute for hours, while the week stood at 49 % — and deduplication that compared
+a report only with the session's newest row let the two defeat each other, so
+every refresh inserted. Read as news, that 45 % made the 49 % recorded earlier
+the same day look like a counter zeroed since, and the daily ration read 216 %.
 
 ## Working on the GUI
 
