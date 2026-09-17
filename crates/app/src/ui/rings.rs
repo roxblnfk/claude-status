@@ -126,9 +126,15 @@ struct Arcs {
     over: Option<(f32, f32)>,
 }
 
-/// Two laps is as far as the picture can say anything: beyond that the overflow
-/// would begin covering itself.
-const MAX_LAPS: f32 = 2.0;
+/// As far round as the picture can go: past two laps the overflow would begin
+/// covering itself.
+///
+/// The cap stops a hair short of closing the second lap, because a closed ring
+/// reads as two laps to the point — and a reading that got clamped never is
+/// that. The sliver of the first lap left showing before twelve o'clock is what
+/// says the gauge ran off the end of its scale; without it 216 % looked exactly
+/// like 200 %.
+const MAX_LAPS: f32 = 1.97;
 
 fn arcs(fill: Option<f32>) -> Arcs {
     let Some(fill) = fill.filter(|f| f.is_finite()).map(|f| f.clamp(0.0, MAX_LAPS)) else {
@@ -295,6 +301,21 @@ mod tests {
     fn beyond_two_laps_the_overflow_stops_growing() {
         assert_eq!(arcs(Some(5.0)), arcs(Some(2.0)));
         assert_eq!(arcs(Some(f32::INFINITY)), arcs(None), "a non-finite reading is no reading");
+    }
+
+    /// A ring closed on twelve o'clock would say "two laps exactly", and a
+    /// reading clamped to the cap never is one: the daily ration stood at
+    /// 216 % and the picture was indistinguishable from 200 %.
+    #[test]
+    fn the_second_lap_stops_short_of_closing_over_the_first() {
+        let a = arcs(Some(5.0));
+        let (over_from, over_to) = a.over.expect("the overflow is drawn");
+        assert_eq!(over_from, 0.0);
+        assert!(over_to < 1.0, "the second lap closed the ring: {over_to}");
+
+        let (from, to) = a.first.expect("a piece of the first lap stays visible");
+        assert!((to - 1.0).abs() < 1e-6, "it is the end of the first lap that shows");
+        assert!(to - from > 0.02, "too thin to see: {}", to - from);
     }
 
     #[test]
