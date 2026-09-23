@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/roxblnfk/claude-status/compare/v1.9.1...v1.10.0) (2026-09-23)
+
+
+### Features
+
+* offer the models this machine has run beside the ones compiled in ([#16](https://github.com/roxblnfk/claude-status/issues/16)) ([c81b16e](https://github.com/roxblnfk/claude-status/commit/c81b16ea68cfa5652b669c74bc83099bb21e6f5a))
+
 ## [1.9.1](https://github.com/roxblnfk/claude-status/compare/v1.9.0...v1.9.1) (2026-09-17)
 
 

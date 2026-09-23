@@ -695,7 +695,7 @@ dependencies = [
 
 [[package]]
 name = "claude-status"
-version = "1.9.1"
+version = "1.10.0"
 dependencies = [
  "anyhow",
  "claude-status-core",
@@ -712,7 +712,7 @@ dependencies = [
 
 [[package]]
 name = "claude-status-core"
-version = "1.9.1"
+version = "1.10.0"
 dependencies = [
  "anyhow",
  "dirs",
