@@ -1167,13 +1167,13 @@ settings:
           Haiku. Пользуйтесь полем выше.
       unknown:
         en: >-
-          "%{value}" (%{slot}) is not a model this version knows about. That may
-          be fine — new ones appear faster than releases of this program — but
-          check it for a typo.
+          "%{value}" (%{slot}) is a model this version does not know about and
+          has never seen running here. That may be fine — a release you have not
+          used yet — but check it for a typo.
         ru: >-
-          «%{value}» (%{slot}) — модель, о которой эта версия не знает. Возможно,
-          всё в порядке: новые появляются быстрее, чем обновления этой программы.
-          Но проверьте, нет ли опечатки.
+          «%{value}» (%{slot}) — модель, о которой эта версия не знает и которая
+          ещё не встречалась в вашей истории. Возможно, всё в порядке: релиз,
+          которым вы пока не пользовались. Но проверьте, нет ли опечатки.
   statusline:
     title:
       en: Status line

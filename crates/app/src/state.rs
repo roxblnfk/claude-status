@@ -134,6 +134,10 @@ pub struct AppState {
     /// `install` and `autostart`: it is not ours, and anything can change it.
     pub model_overrides: model_override::Overrides,
     pub model_warnings: Vec<model_override::Warning>,
+    /// The names the models page offers, and the ones it accepts in silence.
+    /// Rebuilt from the database on every reload: a model that started running
+    /// this morning belongs in the list this afternoon.
+    pub model_catalogue: model_override::Catalogue,
     /// Whether the session starts us, read from the operating system rather
     /// than mirrored in the configuration — a mirror would drift.
     pub autostart: autostart::State,
@@ -213,6 +217,7 @@ impl AppState {
             install: InstallStatus::Absent,
             model_overrides: model_override::Overrides::default(),
             model_warnings: Vec::new(),
+            model_catalogue: model_override::Catalogue::default(),
             autostart: autostart::State::Off,
             error: None,
             refreshed_at: 0,
@@ -255,7 +260,8 @@ impl AppState {
         // A settings file that cannot be read leaves these empty — the same
         // silence `install` above answers with, and for the same reason: the
         // window keeps drawing whatever state the rest of the world is in.
-        let (overrides, warnings) = model_override::read_with_warnings().unwrap_or_default();
+        let (overrides, warnings) =
+            model_override::read_with_warnings(&self.model_catalogue).unwrap_or_default();
         self.model_overrides = overrides;
         self.model_warnings = warnings;
         self.autostart = autostart::state().unwrap_or(autostart::State::Off);
@@ -294,6 +300,10 @@ impl AppState {
 
         self.counted_since = db.first_counted_day()?;
         self.last_scan_ts = db.last_scan_ts()?;
+
+        // Before `refresh` reads the settings: the warnings it works out there
+        // are judged against this list.
+        self.model_catalogue = model_override::Catalogue::with_seen(db.known_models()?);
         Ok(())
     }
 
@@ -617,6 +627,7 @@ mod tests {
             install: InstallStatus::Absent,
             model_overrides: model_override::Overrides::default(),
             model_warnings: Vec::new(),
+            model_catalogue: model_override::Catalogue::default(),
             autostart: autostart::State::Off,
             error: None,
             refreshed_at: 0,

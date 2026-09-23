@@ -205,7 +205,13 @@ fn models(action: ModelsAction) -> Result<()> {
         }
     }
 
-    let (overrides, warnings) = model_override::read_with_warnings()?;
+    // Without a database — a first run, a locked file — the list is the compiled-in
+    // one, which only costs a warning about a model that is perfectly fine.
+    let catalogue = Db::open_default()
+        .and_then(|db| db.known_models())
+        .map(model_override::Catalogue::with_seen)
+        .unwrap_or_default();
+    let (overrides, warnings) = model_override::read_with_warnings(&catalogue)?;
     let path = paths::claude_settings()?;
 
     println!("\n{}", tr_args("cli.models.header", &[("path", &path.display().to_string())]));

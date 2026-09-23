@@ -913,6 +913,25 @@ impl Db {
         self.totals("model", span, project)
     }
 
+    /// Every model id this machine has actually run, for
+    /// [`crate::model_override::Catalogue`].
+    ///
+    /// `samples` is asked as well as the counted logs because the status line
+    /// names the model of a session running now, hours before a scan has read
+    /// its log — and a release that new is the one worth offering.
+    pub fn known_models(&self) -> Result<Vec<String>> {
+        // `%claude-%` rather than a prefix: through Bedrock the same releases
+        // arrive with a vendor in front of them, and those are the names that
+        // person's settings need.
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT model FROM usage_by_day WHERE model LIKE '%claude-%'
+             UNION
+             SELECT DISTINCT model_id FROM samples WHERE model_id LIKE '%claude-%'",
+        )?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
     /// Totals per project over `span`, busiest first.
     pub fn totals_by_project(&self, span: Span<'_>) -> Result<Vec<Totals>> {
         self.totals("project", span, None)
@@ -1276,6 +1295,25 @@ mod tests {
         assert_eq!(db.record_log_scan("a.jsonl", 500, 9, &messages).unwrap(), 0);
 
         assert_eq!(db.totals_by_model(Span::ALL, None).unwrap()[0].input, 100);
+    }
+
+    /// The point of asking `samples` too: a release is worth offering the day it
+    /// starts running, and on that day the only trace of it is the status line.
+    #[test]
+    fn known_models_takes_ids_from_both_the_logs_and_the_status_line() {
+        let mut db = Db::open_in_memory().unwrap();
+        let sonnet = crate::scan::Message {
+            model: "claude-sonnet-5".into(),
+            ..message("m1", "2026-08-01", "alpha", 100)
+        };
+        let junk =
+            crate::scan::Message { model: "unknown".into(), ..message("m2", "2026-08-01", "a", 1) };
+        db.record_log_scan("a.jsonl", 10, 1, &[sonnet, junk]).unwrap();
+        db.record(&input(10.0, 20.0, 999), 100).unwrap();
+
+        let mut models = db.known_models().unwrap();
+        models.sort();
+        assert_eq!(models, ["claude-opus-5", "claude-sonnet-5"]);
     }
 
     #[test]

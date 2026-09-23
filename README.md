@@ -69,7 +69,9 @@ which release each one means — a new one arrives and your sessions move onto i
 `/model opus` keeps working and lands where you left it. It also sets the model a
 session starts on and the one subagents run on. Which models your plan may run is
 known only to Claude Code, so nothing there is verified — a name it does not
-accept shows up as a session that refuses to start.
+accept shows up as a session that refuses to start. The names it offers are the
+releases this build knows of together with every model your own history shows
+you running, so one that came out after the program did is still on the list.
 
 The ◎ button beside the refresh one folds the window into a square panel that
 floats above everything else: four rings — the five-hour session, today's
