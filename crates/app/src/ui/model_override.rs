@@ -9,7 +9,7 @@
 //! is easy to miss.
 
 use claude_status_core::{
-    model_override::{self, Overrides, Slot, Warning},
+    model_override::{self, Catalogue, Overrides, Slot, Warning},
     paths, tr, tr_args,
 };
 use eframe::egui;
@@ -61,7 +61,7 @@ pub fn draw(
         ui.label(tr("settings.models.explanation"));
         ui.add_space(8.0);
 
-        slots(ui, on_disk, fields);
+        slots(ui, on_disk, fields, &state.model_catalogue);
 
         ui.add_space(6.0);
         ui.label(egui::RichText::new(tr("settings.models.suffix_note")).weak());
@@ -135,7 +135,12 @@ pub fn draw(
 const LABEL_WIDTH: f32 = 150.0;
 
 /// One row per slot: what it is, what it is set to, and where that is written.
-fn slots(ui: &mut egui::Ui, on_disk: &Overrides, fields: &mut Fields) {
+fn slots(
+    ui: &mut egui::Ui,
+    on_disk: &Overrides,
+    fields: &mut Fields,
+    catalogue: &Catalogue,
+) {
     for slot in Slot::ALL {
         ui.horizontal(|ui| {
             ui.scope(|ui| {
@@ -143,7 +148,7 @@ fn slots(ui: &mut egui::Ui, on_disk: &Overrides, fields: &mut Fields) {
                 ui.set_max_width(LABEL_WIDTH);
                 ui.strong(slot.label());
             });
-            field(ui, slot, &mut fields[slot as usize]);
+            field(ui, slot, &mut fields[slot as usize], catalogue);
         });
 
         let mut notes =
@@ -162,10 +167,10 @@ fn slots(ui: &mut egui::Ui, on_disk: &Overrides, fields: &mut Fields) {
 
 /// A model name: picked from a list, or typed when the list does not have it.
 ///
-/// Both, rather than either: the list covers what is current at the time of this
-/// release, and the field covers everything that comes after it — a dropdown
-/// alone would go stale and start refusing perfectly good models.
-fn field(ui: &mut egui::Ui, slot: Slot, value: &mut String) {
+/// Both, rather than either: the list covers what this build knows and what this
+/// machine has run, and the field covers everything else — a dropdown alone
+/// would go stale and start refusing perfectly good models.
+fn field(ui: &mut egui::Ui, slot: Slot, value: &mut String, catalogue: &Catalogue) {
     let unset = tr("settings.models.unset");
 
     ui.add(
@@ -185,7 +190,7 @@ fn field(ui: &mut egui::Ui, slot: Slot, value: &mut String) {
             if ui.selectable_label(value.trim().is_empty(), &unset).clicked() {
                 value.clear();
             }
-            for suggestion in slot.suggestions() {
+            for suggestion in catalogue.suggestions(slot) {
                 let chosen = value.trim() == suggestion;
                 let label = egui::RichText::new(&suggestion).monospace();
                 if ui.selectable_label(chosen, label).clicked() {

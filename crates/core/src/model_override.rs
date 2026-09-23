@@ -13,6 +13,14 @@
 //! taken as typed: the list is a convenience, not a gate. `Warning` carries what
 //! could be worked out without asking Claude Code, which is less than a person
 //! might hope.
+//!
+//! The list itself comes from two places. The constants below are what this build
+//! was compiled knowing, and they go stale in the one situation that matters most
+//! — a release lands, sessions are moved onto it, and the id somebody wants to
+//! pin to is offered nowhere and warned about everywhere. So [`Catalogue`] adds
+//! the ids this machine has actually run, which the database has from the logs
+//! and the status line. A model that has run here answers both questions the
+//! constants cannot: Claude Code accepted the name, and the account may use it.
 
 use std::path::PathBuf;
 
@@ -41,22 +49,89 @@ const LEGACY_HAIKU_VAR: &str = "ANTHROPIC_SMALL_FAST_MODEL";
 /// it has to survive a value going through here untouched.
 pub const LONG_CONTEXT_SUFFIX: &str = "[1m]";
 
-/// Opus releases, newest first.
-const OPUS: &[&str] =
-    &["claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5"];
+/// Opus releases known at build time.
+const OPUS: &[&str] = &[
+    "claude-opus-5-5",
+    "claude-opus-5",
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-opus-4-6",
+    "claude-opus-4-5",
+];
 
-/// Sonnet releases, newest first.
+/// Sonnet releases known at build time.
 const SONNET: &[&str] = &["claude-sonnet-5", "claude-sonnet-4-6", "claude-sonnet-4-5"];
 
 /// Haiku releases. The one family with no 1M context.
 const HAIKU: &[&str] = &["claude-haiku-4-5"];
 
 /// Models outside the three aliased families.
-const OTHER: &[&str] = &["claude-fable-5"];
+const OTHER: &[&str] = &["claude-fable-5-1", "claude-fable-5"];
 
 /// Names Claude Code resolves for itself. `opusplan` is Opus for planning and
 /// Sonnet for the work.
 pub const ALIASES: &[&str] = &["opus", "sonnet", "haiku", "opusplan"];
+
+/// A family of releases: the three the aliases resolve within, and everything
+/// else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Family {
+    Opus,
+    Sonnet,
+    Haiku,
+    /// Models with no alias of their own. Offered only where any model will do.
+    Other,
+}
+
+impl Family {
+    /// Which family a name belongs to, going by the word in the middle of it.
+    ///
+    /// Crude, and it has to be: this is asked about names no release of this
+    /// program has heard of, where the name is all there is. Every id Anthropic
+    /// has shipped carries its family in plain text, prefixed or not.
+    fn of(name: &str) -> Family {
+        let name = name.to_ascii_lowercase();
+        for (word, family) in
+            [("opus", Family::Opus), ("sonnet", Family::Sonnet), ("haiku", Family::Haiku)]
+        {
+            if name.contains(word) {
+                return family;
+            }
+        }
+        Family::Other
+    }
+
+    /// The ids compiled into this build for the family.
+    fn builtin(self) -> &'static [&'static str] {
+        match self {
+            Family::Opus => OPUS,
+            Family::Sonnet => SONNET,
+            Family::Haiku => HAIKU,
+            Family::Other => OTHER,
+        }
+    }
+}
+
+/// Orders ids newest first, by the numbers in the name.
+///
+/// A version is the only thing that differs between `claude-opus-5-5` and
+/// `claude-opus-4-8`, so comparing the digit groups in order sorts a family with
+/// no table to keep up to date — half of what is sorted here was unknown when
+/// this was written. Names that tie fall back to themselves, which is what makes
+/// the order independent of how they arrived.
+fn newest_first(a: &str, b: &str) -> std::cmp::Ordering {
+    version(b).cmp(&version(a)).then_with(|| a.cmp(b))
+}
+
+/// The digit groups of a name, in order: `claude-opus-4-8` is `[4, 8]`.
+fn version(name: &str) -> Vec<u64> {
+    name.split(|c: char| !c.is_ascii_digit()).filter_map(|part| part.parse().ok()).collect()
+}
+
+/// Whether the name is one this build was compiled with, alias or id.
+fn builtin(name: &str) -> bool {
+    [OPUS, SONNET, HAIKU, OTHER, ALIASES].iter().any(|group| group.contains(&name))
+}
 
 /// Which model a slot points at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -120,32 +195,25 @@ impl Slot {
         tr(&format!("settings.models.hint.{}", self.name()))
     }
 
-    /// Names worth offering for this slot, most recent first.
+    /// The families worth offering for this slot.
     ///
-    /// An alias slot offers only its own family: redirecting `opus` at a Sonnet
-    /// would work, and would make every later `/model opus` a lie.
-    pub fn suggestions(self) -> Vec<String> {
-        let families: &[&[&str]] = match self {
-            Slot::Opus => &[OPUS],
-            Slot::Sonnet => &[SONNET],
-            Slot::Haiku => &[HAIKU],
-            Slot::Default | Slot::Subagent => &[OPUS, SONNET, HAIKU, OTHER],
-        };
-
-        let aliases: &[&str] = match self {
-            // An alias slot pointed at an alias is either a no-op or a loop.
-            Slot::Default | Slot::Subagent => ALIASES,
-            _ => &[],
-        };
-
-        let mut out = Vec::new();
-        for name in aliases.iter().chain(families.iter().flat_map(|f| f.iter())) {
-            out.push((*name).to_string());
-            if takes_long_context(name) {
-                out.push(format!("{name}{LONG_CONTEXT_SUFFIX}"));
+    /// An alias slot offers only its own: redirecting `opus` at a Sonnet would
+    /// work, and would make every later `/model opus` a lie.
+    fn families(self) -> &'static [Family] {
+        match self {
+            Slot::Opus => &[Family::Opus],
+            Slot::Sonnet => &[Family::Sonnet],
+            Slot::Haiku => &[Family::Haiku],
+            Slot::Default | Slot::Subagent => {
+                &[Family::Opus, Family::Sonnet, Family::Haiku, Family::Other]
             }
         }
-        out
+    }
+
+    /// Whether the aliases belong in this slot's list at all — an alias slot
+    /// pointed at an alias is either a no-op or a loop.
+    fn takes_aliases(self) -> bool {
+        matches!(self, Slot::Default | Slot::Subagent)
     }
 }
 
@@ -154,13 +222,69 @@ fn takes_long_context(name: &str) -> bool {
     !name.contains("haiku")
 }
 
-/// Whether this build recognises the name, suffix and all.
+/// The names to offer and to accept without comment: the ids compiled into this
+/// build, plus the ones this machine has been seen to run.
 ///
-/// A `false` is not a verdict — ids appear faster than releases of this program —
-/// only grounds for asking the user to look twice.
-pub fn is_known(value: &str) -> bool {
-    let bare = value.strip_suffix(LONG_CONTEXT_SUFFIX).unwrap_or(value);
-    [OPUS, SONNET, HAIKU, OTHER, ALIASES].iter().any(|group| group.contains(&bare))
+/// [`Catalogue::default`] is the constants alone — what a caller falls back to
+/// when the database cannot be opened.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Catalogue {
+    /// Seen ids the constants do not already carry, newest first.
+    seen: Vec<String>,
+}
+
+impl Catalogue {
+    /// Takes the ids a machine has run — [`crate::db::Db::known_models`].
+    ///
+    /// The suffix comes off them: what is recorded of a session started on
+    /// `claude-opus-5[1m]` is that name, suffix and all, and keeping it would
+    /// both duplicate the bare id and offer it again as `claude-opus-5[1m][1m]`.
+    pub fn with_seen(seen: impl IntoIterator<Item = String>) -> Self {
+        let mut ids: Vec<String> = seen
+            .into_iter()
+            .map(|id| {
+                let id = id.trim();
+                id.strip_suffix(LONG_CONTEXT_SUFFIX).unwrap_or(id).trim().to_string()
+            })
+            .filter(|id| !id.is_empty() && !builtin(id))
+            .collect();
+        ids.sort_by(|a, b| newest_first(a, b));
+        ids.dedup();
+        Self { seen: ids }
+    }
+
+    /// Names worth offering for a slot, most recent first.
+    pub fn suggestions(&self, slot: Slot) -> Vec<String> {
+        let mut names: Vec<&str> = if slot.takes_aliases() { ALIASES.to_vec() } else { Vec::new() };
+
+        for family in slot.families() {
+            let mut of_family: Vec<&str> = family.builtin().to_vec();
+            of_family.extend(
+                self.seen.iter().filter(|id| Family::of(id) == *family).map(String::as_str),
+            );
+            of_family.sort_by(|a, b| newest_first(a, b));
+            names.extend(of_family);
+        }
+
+        let mut out = Vec::new();
+        for name in names {
+            out.push(name.to_string());
+            if takes_long_context(name) {
+                out.push(format!("{name}{LONG_CONTEXT_SUFFIX}"));
+            }
+        }
+        out
+    }
+
+    /// Whether the name is one we recognise, suffix and all.
+    ///
+    /// A `false` is not a verdict — ids appear faster than releases of this
+    /// program, and a machine that has never run a model says nothing about it —
+    /// only grounds for asking the user to look twice.
+    pub fn is_known(&self, value: &str) -> bool {
+        let bare = value.strip_suffix(LONG_CONTEXT_SUFFIX).unwrap_or(value);
+        builtin(bare) || self.seen.iter().any(|id| id == bare)
+    }
 }
 
 /// What each slot is set to, if anything.
@@ -265,10 +389,10 @@ pub fn read() -> Result<Overrides> {
 }
 
 /// Reads the overrides together with what is worth warning about them.
-pub fn read_with_warnings() -> Result<(Overrides, Vec<Warning>)> {
+pub fn read_with_warnings(catalogue: &Catalogue) -> Result<(Overrides, Vec<Warning>)> {
     let settings = settings::read()?;
     let overrides = Overrides::from_settings(&settings);
-    let warnings = warnings(&overrides, &settings, |name| std::env::var(name).ok());
+    let warnings = warnings(&overrides, &settings, catalogue, |name| std::env::var(name).ok());
     Ok((overrides, warnings))
 }
 
@@ -298,7 +422,7 @@ pub enum Warning {
     DuplicateDefault { value: String },
     /// The settings still carry the name the Haiku override used to go by.
     Legacy { name: String, value: String },
-    /// A name this build has not heard of.
+    /// A name neither compiled into this build nor ever run on this machine.
     Unknown { slot: Slot, value: String },
 }
 
@@ -329,12 +453,13 @@ impl Warning {
 pub fn warnings(
     overrides: &Overrides,
     settings: &Map<String, Value>,
+    catalogue: &Catalogue,
     env: impl Fn(&str) -> Option<String>,
 ) -> Vec<Warning> {
     let mut out = Vec::new();
 
     for (slot, value) in overrides.entries() {
-        if !is_known(value) {
+        if !catalogue.is_known(value) {
             out.push(Warning::Unknown { slot, value: value.to_string() });
         }
     }
@@ -477,26 +602,110 @@ mod tests {
 
     #[test]
     fn the_long_context_suffix_is_recognised_but_haiku_has_none() {
-        assert!(is_known("claude-opus-4-8"));
-        assert!(is_known("claude-opus-4-8[1m]"));
-        assert!(is_known("opus"));
-        assert!(!is_known("claude-opus-9"));
+        let catalogue = Catalogue::default();
+        assert!(catalogue.is_known("claude-opus-4-8"));
+        assert!(catalogue.is_known("claude-opus-4-8[1m]"));
+        assert!(catalogue.is_known("opus"));
+        assert!(!catalogue.is_known("claude-opus-9"));
 
-        assert!(Slot::Opus.suggestions().contains(&"claude-opus-4-8[1m]".to_string()));
-        assert!(!Slot::Haiku.suggestions().iter().any(|s| s.contains(LONG_CONTEXT_SUFFIX)));
+        assert!(catalogue.suggestions(Slot::Opus).contains(&"claude-opus-4-8[1m]".to_string()));
+        assert!(
+            !catalogue.suggestions(Slot::Haiku).iter().any(|s| s.contains(LONG_CONTEXT_SUFFIX))
+        );
     }
 
     /// Pointing `opus` at a Sonnet would work and would make every later
     /// `/model opus` misleading, so the list does not propose it.
     #[test]
     fn an_alias_slot_only_offers_its_own_family() {
-        let opus = Slot::Opus.suggestions();
+        let catalogue = Catalogue::default();
+        let opus = catalogue.suggestions(Slot::Opus);
         assert!(opus.iter().all(|s| s.contains("opus")), "{opus:?}");
         assert!(!opus.iter().any(|s| ALIASES.contains(&s.as_str())), "{opus:?}");
 
-        let default = Slot::Default.suggestions();
+        let default = catalogue.suggestions(Slot::Default);
         assert!(default.contains(&"opus".to_string()));
         assert!(default.iter().any(|s| s.contains("sonnet")));
+    }
+
+    /// The whole point of asking the database: a release that shipped after this
+    /// build is the one somebody wants to pin to, and the constants have never
+    /// heard of it.
+    #[test]
+    fn a_model_this_machine_has_run_is_offered_and_not_warned_about() {
+        let catalogue = Catalogue::with_seen(["claude-opus-7-2".to_string()]);
+
+        let opus = catalogue.suggestions(Slot::Opus);
+        assert_eq!(opus.first().map(String::as_str), Some("claude-opus-7-2"), "{opus:?}");
+        assert!(opus.contains(&"claude-opus-7-2[1m]".to_string()), "{opus:?}");
+        assert!(catalogue.suggestions(Slot::Sonnet).iter().all(|s| s.contains("sonnet")));
+
+        let mut overrides = Overrides::default();
+        overrides.set(Slot::Opus, "claude-opus-7-2");
+        assert!(warnings(&overrides, &Map::new(), &catalogue, no_env).is_empty());
+    }
+
+    /// Seen ids are merged into their family rather than appended to it: a run of
+    /// Opus 4.6 last spring does not belong above Opus 5.
+    #[test]
+    fn seen_and_compiled_in_ids_are_ordered_together_newest_first() {
+        let catalogue =
+            Catalogue::with_seen(["claude-opus-4-1".to_string(), "claude-opus-5-9".to_string()]);
+        let ids: Vec<String> = catalogue
+            .suggestions(Slot::Opus)
+            .into_iter()
+            .filter(|s| !s.ends_with(LONG_CONTEXT_SUFFIX))
+            .collect();
+
+        assert_eq!(ids.first().map(String::as_str), Some("claude-opus-5-9"), "{ids:?}");
+        assert_eq!(ids.last().map(String::as_str), Some("claude-opus-4-1"), "{ids:?}");
+        let five = ids.iter().position(|s| s == "claude-opus-5").unwrap();
+        let four_eight = ids.iter().position(|s| s == "claude-opus-4-8").unwrap();
+        assert!(five < four_eight, "{ids:?}");
+    }
+
+    /// Sessions asked for a long context are recorded under the name they asked
+    /// under, suffix and all — a real database carried `claude-opus-5[1m]`
+    /// beside `claude-opus-5`. Left on, it doubles the list and then offers
+    /// `claude-opus-5[1m][1m]`.
+    #[test]
+    fn a_seen_id_is_taken_without_the_long_context_suffix() {
+        let catalogue = Catalogue::with_seen([
+            "claude-opus-5[1m]".to_string(),
+            "claude-opus-6[1m]".to_string(),
+        ]);
+        let ids = catalogue.suggestions(Slot::Opus);
+
+        assert!(!ids.iter().any(|s| s.contains("[1m][1m]")), "{ids:?}");
+        assert_eq!(ids.iter().filter(|s| *s == "claude-opus-5").count(), 1, "{ids:?}");
+        assert!(ids.contains(&"claude-opus-6".to_string()), "{ids:?}");
+        assert!(catalogue.is_known("claude-opus-6[1m]"));
+    }
+
+    /// The database hands over whatever the logs carried, which is not always a
+    /// model id — and an id already in the constants must not be listed twice.
+    #[test]
+    fn the_seen_list_is_deduplicated_and_ignores_what_is_already_known() {
+        let catalogue = Catalogue::with_seen([
+            "claude-opus-5".to_string(),
+            "claude-opus-6".to_string(),
+            "claude-opus-6".to_string(),
+            "  ".to_string(),
+        ]);
+        let ids = catalogue.suggestions(Slot::Opus);
+        assert_eq!(ids.iter().filter(|s| *s == "claude-opus-5").count(), 1, "{ids:?}");
+        assert_eq!(ids.iter().filter(|s| *s == "claude-opus-6").count(), 1, "{ids:?}");
+        assert!(!ids.iter().any(|s| s.trim().is_empty()), "{ids:?}");
+    }
+
+    /// A vendor prefix is what Bedrock puts in front of the same release. The
+    /// family has to be read out of the name wherever it sits.
+    #[test]
+    fn a_prefixed_id_still_lands_in_its_family() {
+        let id = "us.anthropic.claude-sonnet-5-v1:0";
+        let catalogue = Catalogue::with_seen([id.to_string()]);
+        assert!(catalogue.suggestions(Slot::Sonnet).contains(&id.to_string()));
+        assert!(!catalogue.suggestions(Slot::Opus).contains(&id.to_string()));
     }
 
     /// A field emptied on screen has to reach the file as "remove the key",
@@ -541,7 +750,7 @@ mod tests {
     fn an_unfamiliar_name_is_reported_but_not_refused() {
         let mut overrides = Overrides::default();
         overrides.set(Slot::Opus, "claude-opus-9-9");
-        let found = warnings(&overrides, &Map::new(), no_env);
+        let found = warnings(&overrides, &Map::new(), &Catalogue::default(), no_env);
 
         assert_eq!(
             found,
@@ -552,7 +761,7 @@ mod tests {
 
     #[test]
     fn a_variable_in_the_real_environment_is_reported() {
-        let found = warnings(&Overrides::default(), &Map::new(), |name| {
+        let found = warnings(&Overrides::default(), &Map::new(), &Catalogue::default(), |name| {
             (name == "ANTHROPIC_DEFAULT_OPUS_MODEL").then(|| "claude-opus-4-6".to_string())
         });
         assert_eq!(
@@ -571,7 +780,7 @@ mod tests {
             "model": "opus",
             "env": { "ANTHROPIC_MODEL": "claude-sonnet-5", "ANTHROPIC_SMALL_FAST_MODEL": "x" },
         }));
-        let found = warnings(&Overrides::from_settings(&settings), &settings, no_env);
+        let found = warnings(&Overrides::from_settings(&settings), &settings, &Catalogue::default(), no_env);
 
         assert!(found.contains(&Warning::DuplicateDefault { value: "claude-sonnet-5".into() }));
         assert!(found.iter().any(|w| matches!(w, Warning::Legacy { .. })));
@@ -580,7 +789,7 @@ mod tests {
     #[test]
     fn a_plain_state_warns_about_nothing() {
         let settings = settings_with(json!({ "env": { "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-8" } }));
-        let found = warnings(&Overrides::from_settings(&settings), &settings, no_env);
+        let found = warnings(&Overrides::from_settings(&settings), &settings, &Catalogue::default(), no_env);
         assert!(found.is_empty(), "{found:?}");
     }
 
